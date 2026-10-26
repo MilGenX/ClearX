@@ -391,7 +391,49 @@ struct BoostView: View {
                 }
                 Button("Quit selected") { m.speedUp(quit: Array(m.quitPick)) }.font(.caption).disabled(m.quitPick.isEmpty)
             }
-        }.padding(6).background(Color.accentColor.opacity(0.08)).cornerRadius(6)
+        }.padding(10).foregroundColor(Theme.text)
+        .background(RoundedRectangle(cornerRadius: 10).fill(Theme.card)).overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.line))
+    }
+}
+
+// Black theme: one ground, one card tone, one accent; status colours only where something needs attention.
+enum Theme {
+    static let bg = Color.black
+    static let card = Color(red: 0.043, green: 0.043, blue: 0.051)     // #0B0B0D
+    static let line = Color(red: 0.122, green: 0.122, blue: 0.133)     // #1F1F22
+    static let text = Color(red: 0.949, green: 0.949, blue: 0.949)     // #F2F2F2
+    static let sub = Color(red: 0.604, green: 0.604, blue: 0.627)      // #9A9AA0
+    static let accent = Color(red: 0.486, green: 0.961, blue: 0.769)   // #7CF5C4
+    static let info = Color(red: 0.541, green: 0.706, blue: 1.0)       // #8AB4FF
+    static let warn = Color(red: 1.0, green: 0.710, blue: 0.278)       // #FFB547
+    static let bad = Color(red: 1.0, green: 0.420, blue: 0.420)        // #FF6B6B
+}
+
+struct AccentButton: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label.font(.system(size: 15, weight: .bold)).foregroundColor(.black)
+            .frame(maxWidth: .infinity, minHeight: 44)
+            .background(RoundedRectangle(cornerRadius: 12).fill(Theme.accent.opacity(configuration.isPressed ? 0.75 : 1)))
+    }
+}
+
+struct GhostButton: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label.font(.system(size: 12, weight: .semibold)).foregroundColor(Theme.text)
+            .padding(.horizontal, 10).padding(.vertical, 5)
+            .background(Capsule().fill(Theme.line.opacity(configuration.isPressed ? 1 : 0.7)))
+    }
+}
+
+struct ScoreRing: View {
+    let score: Int, color: Color
+    var body: some View {
+        ZStack {
+            Circle().stroke(Theme.line, lineWidth: 8)
+            Circle().trim(from: 0, to: CGFloat(min(max(score, 0), 100)) / 100)
+                .stroke(color, style: StrokeStyle(lineWidth: 8, lineCap: .round)).rotationEffect(.degrees(-90))
+            Text("\(score)").font(.system(size: 28, weight: .bold, design: .rounded)).foregroundColor(Theme.text)
+        }.frame(width: 84, height: 84).animation(.easeOut(duration: 0.6), value: score)
     }
 }
 
@@ -400,15 +442,16 @@ struct SimpleBar: View {
     let title: String, frac: Double, word: String, color: Color
     var detail = ""
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            HStack { Text(title); Spacer(); Text(word).bold().foregroundColor(color) }.font(.callout)
-            if !detail.isEmpty { Text(detail).font(.caption).foregroundColor(.secondary) }
+        VStack(alignment: .leading, spacing: 5) {
+            HStack { Text(title).foregroundColor(Theme.text); Spacer(); Text(word).fontWeight(.semibold).foregroundColor(color) }
+                .font(.system(size: 13))
             GeometryReader { g in
                 ZStack(alignment: .leading) {
-                    Capsule().fill(Color.secondary.opacity(0.15))
+                    Capsule().fill(Theme.line)
                     Capsule().fill(color).frame(width: g.size.width * CGFloat(min(max(frac, 0.03), 1)))
                 }
-            }.frame(height: 8)
+            }.frame(height: 6)
+            if !detail.isEmpty { Text(detail).font(.system(size: 11)).foregroundColor(Theme.sub) }
         }
     }
 }
@@ -416,84 +459,120 @@ struct SimpleBar: View {
 struct Panel: View {
     @ObservedObject var m: Model
     @Environment(\.openWindow) var openWindow
+    func open(_ tab: Int? = nil) {
+        if let t = tab { m.detailsTab = t }
+        openWindow(id: "details"); NSApp.activate(ignoringOtherApps: true)
+    }
+    var greeting: String {
+        let h = Calendar.current.component(.hour, from: Date())
+        let part = h < 5 ? "Working late" : h < 12 ? "Good morning" : h < 18 ? "Good afternoon" : "Good evening"
+        let first = NSFullUserName().split(separator: " ").first.map(String.init) ?? ""
+        return first.isEmpty ? part : "\(part), \(first)"
+    }
     var memWord: (String, Color) {
-        switch m.level { case "red": return ("Strained", .red); case "orange": return ("Strained", .orange)
-                         case "yellow": return ("Busy", .yellow); default: return ("Good", .green) }
+        switch m.level { case "red": return ("Strained", Theme.bad); case "orange": return ("Strained", Theme.warn)
+                         case "yellow": return ("Busy", Theme.info); default: return ("Good", Theme.accent) }
     }
     var cpuAvg: Double { m.cores.isEmpty ? 0 : m.cores.reduce(0, +) / Double(m.cores.count) }
     var cpuWord: (String, Color) {
-        m.speedLimit < 90 ? ("Too hot", .red) : m.speedLimit < 100 ? ("Warm", .orange) :
-            cpuAvg > 80 ? ("Busy", .yellow) : ("Good", .green)
+        m.speedLimit < 90 ? ("Too hot", Theme.bad) : m.speedLimit < 100 ? ("Warm", Theme.warn) :
+            cpuAvg > 80 ? ("Busy", Theme.info) : ("Good", Theme.accent)
     }
     var diskWord: (String, Color) {
-        m.diskFree < 20 << 30 ? ("Almost full", .red) : m.diskFree < 40 << 30 ? ("Getting full", .orange) : ("Good", .green)
+        m.diskFree < 20 << 30 ? ("Almost full", Theme.bad) : m.diskFree < 40 << 30 ? ("Getting full", Theme.warn) : ("Good", Theme.accent)
+    }
+    var scoreColor: Color { m.health >= 85 ? Theme.accent : m.health >= 65 ? Theme.warn : Theme.bad }
+    var status: (String, Color) {
+        if !m.enabled { return ("Off", Theme.sub) }
+        switch m.level { case "red", "orange": return ("Protecting", Theme.warn); case "yellow": return ("Busy", Theme.info)
+                         default: return ("All good", Theme.accent) }
+    }
+    var headline: String {
+        if !m.enabled { return "MemGuard is off" }
+        switch m.level {
+        case "red": return "Very short on memory"
+        case "orange": return "Short on memory"
+        case "yellow": return "Your Mac is busy"
+        default: return m.speedLimit < 100 ? "Running warm" : "Your Mac is in good shape"
+        }
     }
     var sentence: String {
-        if !m.enabled { return "MemGuard is off. Your Mac is on its own." }
+        if !m.enabled { return "Your Mac is on its own until you turn it back on." }
         switch m.level {
-        case "red": return "Your Mac is very short on memory. Background apps are paused so what you're using keeps going."
-        case "orange": return "Your Mac is short on memory. Background apps are paused for a moment."
-        case "yellow": return "Your Mac is busy. MemGuard is quietly slowing background apps."
-        default: return m.speedLimit < 100 ? "Your Mac is running warm. Builds are slowed a little to cool it." :
-            "Your Mac is running smoothly."
+        case "red": return "Background apps are paused so what you're using keeps going."
+        case "orange": return "Background apps are paused for a moment."
+        case "yellow": return "MemGuard is quietly slowing background apps."
+        default: return m.speedLimit < 100 ? "Builds are slowed a little to cool it down." : "Nothing needs doing right now."
         }
     }
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .center, spacing: 12) {
-                VStack(spacing: 0) {
-                    Text("\(m.health)").font(.system(size: 34, weight: .bold, design: .rounded))
-                        .foregroundColor(m.health >= 85 ? .green : m.health >= 65 ? .orange : .red)
-                    Text("health").font(.caption2).foregroundColor(.secondary)
-                }.help(m.healthWhy.isEmpty ? "Nothing is taking points off." : m.healthWhy.joined(separator: "\n"))
-                Text(sentence).font(.callout).fixedSize(horizontal: false, vertical: true)
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(greeting).font(.system(size: 11)).foregroundColor(Theme.sub)
+                    Text("Your iMac").font(.system(size: 15, weight: .semibold)).foregroundColor(Theme.text)
+                }
+                Spacer()
+                Text(status.0).font(.system(size: 11, weight: .semibold)).foregroundColor(status.1)
+                    .padding(.horizontal, 10).padding(.vertical, 4)
+                    .background(Capsule().fill(Theme.card)).overlay(Capsule().stroke(Theme.line))
+            }
+            HStack(spacing: 16) {
+                ScoreRing(score: m.health, color: scoreColor)
+                    .help(m.healthWhy.isEmpty ? "Nothing is taking points off." : m.healthWhy.joined(separator: "\n"))
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(headline).font(.system(size: 16, weight: .semibold)).foregroundColor(Theme.text)
+                    Text(sentence).font(.system(size: 12)).foregroundColor(Theme.sub).fixedSize(horizontal: false, vertical: true)
+                }
                 Spacer(minLength: 0)
             }
-            Button(action: { m.speedUp() }) {
-                Text(m.boosting ? "Speeding up…" : "Speed Up").font(.headline).frame(maxWidth: .infinity).padding(.vertical, 4)
-            }.buttonStyle(.borderedProminent).disabled(m.boosting || !m.enabled)
+            .padding(14)
+            .background(RoundedRectangle(cornerRadius: 12).fill(Theme.card))
+            .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.line))
+            Button(action: { m.speedUp() }) { Text(m.boosting ? "Speeding up…" : "Speed Up") }
+                .buttonStyle(AccentButton()).disabled(m.boosting || !m.enabled).opacity(m.boosting || !m.enabled ? 0.5 : 1)
             if let b = m.boost { BoostView(m: m, b: b) }
             SimpleBar(title: "Memory", frac: Double(m.poolTotal - (m.poolSeg["free"] ?? 0) - (m.poolSeg["cached"] ?? 0)) / Double(m.poolTotal),
                       word: memWord.0, color: memWord.1,
                       detail: "\(gb(m.availB)) of 16 GB ready for apps right now")
             SimpleBar(title: "Processor", frac: cpuAvg / 100, word: cpuWord.0, color: cpuWord.1,
                       detail: String(format: "%.0f%% busy%@", cpuAvg, m.speedLimit < 100 ? " · slowed by heat to \(m.speedLimit)%" : ""))
-            Button(action: { m.detailsTab = 0; openWindow(id: "details"); NSApp.activate(ignoringOtherApps: true) }) {
+            Button(action: { open(0) }) {
                 SimpleBar(title: "Storage", frac: 1 - Double(m.diskFree + m.diskPurgeable) / Double(max(m.diskTotal, 1)),
                           word: diskWord.0, color: diskWord.1,
-                          detail: "\(gb(m.diskFree)) free + \(gb(m.diskPurgeable)) macOS can clear, of \(gb(m.diskTotal)) · details ›")
+                          detail: "\(gb(m.diskFree + m.diskPurgeable)) free of \(gb(m.diskTotal)) · SSD healthy\(m.ssdToday > 100 << 30 ? ", busy today" : "")")
                     .contentShape(Rectangle())
             }.buttonStyle(.plain)
-            HStack {
-                Text("SSD healthy · fast · written today \(gb(m.ssdToday)) (\(m.ssdToday > 100 << 30 ? "High" : "Good"))")
-                    .font(.caption).foregroundColor(m.ssdToday > 100 << 30 ? .orange : .secondary)
-                Spacer()
-                Button("Free up space") { m.detailsTab = 2; openWindow(id: "details"); NSApp.activate(ignoringOtherApps: true) }
-                    .controlSize(.small)
-            }
             if !m.needs.isEmpty {
-                Divider()
-                Text("Needs you").font(.caption).foregroundColor(.secondary)
-                ForEach(Array(m.needs.prefix(3).enumerated()), id: \.offset) { _, n in
-                    HStack(alignment: .center) {
-                        Text(n["text"] as? String ?? "").font(.callout).fixedSize(horizontal: false, vertical: true)
-                        Spacer()
-                        Button(n["button"] as? String ?? "Fix") { m.doNeed(n["kind"] as? String ?? "", open: { openWindow(id: "details") }) }
-                            .controlSize(.small)
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("NEEDS YOU").font(.system(size: 10, weight: .semibold)).kerning(0.8).foregroundColor(Theme.sub)
+                    ForEach(Array(m.needs.prefix(3).enumerated()), id: \.offset) { _, n in
+                        HStack(spacing: 10) {
+                            Circle().fill(Theme.warn).frame(width: 7, height: 7)
+                            Text(n["text"] as? String ?? "").font(.system(size: 12)).foregroundColor(Theme.text)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Spacer()
+                            Button(n["button"] as? String ?? "Fix") { m.doNeed(n["kind"] as? String ?? "", open: { open() }) }
+                                .buttonStyle(GhostButton())
+                        }
                     }
                 }
+                .padding(.top, 10).overlay(Rectangle().fill(Theme.line).frame(height: 1), alignment: .top)
             }
-            Divider()
             HStack {
-                Button("Details…") { openWindow(id: "details"); NSApp.activate(ignoringOtherApps: true) }
+                Button("Details…") { open() }.buttonStyle(.plain).foregroundColor(Theme.sub)
                 Spacer()
-                Toggle("MemGuard", isOn: Binding(get: { m.enabled }, set: { m.act([$0 ? "on" : "off"]) }))
-                    .toggleStyle(.switch).controlSize(.small)
-                Button("Quit") { NSApp.terminate(nil) }
-            }.font(.caption)
+                Toggle("On", isOn: Binding(get: { m.enabled }, set: { m.act([$0 ? "on" : "off"]) }))
+                    .toggleStyle(.switch).controlSize(.mini).tint(Theme.accent).foregroundColor(Theme.sub)
+                Button("Quit") { NSApp.terminate(nil) }.buttonStyle(.plain).foregroundColor(Theme.sub)
+            }
+            .font(.system(size: 12))
+            .padding(.top, 10).overlay(Rectangle().fill(Theme.line).frame(height: 1), alignment: .top)
         }
-        .padding(14)
-        .frame(width: 340)
+        .padding(18)
+        .frame(width: 360)
+        .background(Theme.bg)
+        .environment(\.colorScheme, .dark)
     }
 }
 
@@ -507,6 +586,7 @@ struct DetailsView: View {
             ScrollView { monitor.padding(12) }.tabItem { Text("Live") }.tag(1)
             ScrollView { MaintView(mm: mm).padding(12) }.tabItem { Text("Clean up & checks") }.tag(2)
         }.frame(minWidth: 480, minHeight: 640)
+        .background(Theme.bg).preferredColorScheme(.dark).tint(Theme.accent)
     }
 
     var monitor: some View {

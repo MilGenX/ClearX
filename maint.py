@@ -678,10 +678,9 @@ def optimize(storage_info=None, apply=False, log=print):
         "systemextensionsctl list")
     add("Startup", "Uptime", f"booted {time.strftime('%Y-%m-%d %H:%M', time.localtime(boot_t))} "
         f"({(time.time() - boot_t) / 86400:.1f} days)", "info")
-    btm = sh("sfltool", "dumpbtm", timeout=60)
-    stale = sorted(set(re.findall(r"URL: file://(/Users/[^/]+/\.Trash/[^\n]+)", btm))) if btm_active(btm, "macpaw") else []
+    stale = sorted(set(re.findall(r"\b(com\.macpaw\.[\w.]+)", sh("launchctl", "list"))))  # no sfltool: it prompts for admin
     add("Startup", "Login items of apps in the Trash (stale BTM records)",
-        f"{len(stale)}: " + ", ".join(os.path.basename(s.rstrip('/')).replace('%20', ' ') for s in stale),
+        f"{len(stale)}: " + ", ".join(stale),
         "ok" if not stale else "needs you",
         "System Settings > General > Login Items & Extensions: turn off the CleanMyMac X items "
         "(they disappear once the Trash is emptied)")
@@ -846,8 +845,8 @@ def needs(maint, st):
     if hm and hm.group(1) != "0":
         add("hibernate", "Stop writing a 16 GB copy of memory to your drive every time the Mac sleeps",
             "Fix", "fix:hibernate")
-    btm = sh("sfltool", "dumpbtm", timeout=60)
-    if btm_active(btm, "macpaw"):
+    # no sfltool here: it needs admin rights and prompts for a password. launchctl shows what can actually run.
+    if re.search(r"\bcom\.macpaw\.", sh("launchctl", "list")):
         add("cleanmymac", "Turn off the CleanMyMac leftovers in Login Items", "Open Settings",
             "open:x-apple.systempreferences:com.apple.LoginItems-Settings.extension")
     caches = next((c for c in maint.get("junk") or [] if c["id"] == "caches"), None)

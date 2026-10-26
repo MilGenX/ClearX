@@ -1,0 +1,16 @@
+2026-10-26 15:39:08 LEVEL ? -> green: level=green swap=3734M free=903M pressure=1 swapout_rate=0MB/tick paused=0
+2026-10-26 15:39:10 BUDGET Python* over: 1539M > 1G
+2026-10-26 15:39:10 RENICE +10 pid=14124 Python mem=1539M (budget Python* 1G)
+2026-10-26 15:39:10 BUDGET python* over: 1539M > 1G
+2026-10-26 15:39:10 RENICE +10 pid=14124 Python mem=1539M (budget python* 1G)
+2026-10-26 15:39:10 LEVEL green -> yellow: level=yellow swap=3734M free=541M pressure=1 swapout_rate=0MB/tick paused=0
+2026-10-26 15:39:12 PAUSE (SIGSTOP) pid=14124 Python mem=1539M (budget Python* 1539M > 1G)
+2026-10-26 15:39:12 LEVEL yellow -> green: level=green swap=3702M free=425M pressure=1 swapout_rate=0MB/tick paused=1
+2026-10-26 15:39:14 RESUME (SIGCONT) pid=14124 Python after 1s (pressure back to normal)
+2026-10-26 15:39:14 LEVEL green -> orange: level=orange swap=3702M free=344M pressure=1 swapout_rate=0MB/tick paused=0
+2026-10-26 15:39:15 BUDGET Python* over: 1539M > 1G
+2026-10-26 15:39:15 BUDGET python* over: 1539M > 1G
+2026-10-26 15:39:16 PAUSE (SIGSTOP) pid=14124 Python mem=1539M (level orange, largest process)
+2026-10-26 15:39:23 LEVEL orange -> yellow: level=yellow swap=3446M free=34M pressure=1 swapout_rate=0MB/tick paused=1
+2026-10-26 15:39:23 RESUME (SIGCONT) pid=14124 Python after 7s (max pause 0.1 min reached)
+2026-10-26 15:39:25 LEVEL yellow -> red: level=red swap=3382M free=33M pressure=1 swapout_rate=0MB/tick paused=0

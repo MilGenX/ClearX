@@ -1,0 +1,8 @@
+state/
+logs/
+app/build/
+bench/work/
+bench/mydaw-bench.out
+__pycache__/
+*.pyc
+test/bin/

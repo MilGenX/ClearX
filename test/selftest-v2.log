@@ -1,0 +1,23 @@
+2026-10-26 15:57:24 MODE ? -> build
+2026-10-26 15:57:24 LEVEL ? -> green: level=green mode=build swap=261M free=4535M avail=8497M pressure=1 swapout=0MB/tick paused=0
+2026-10-26 15:57:25 PAUSE (SIGSTOP) pid=24369 clang mem=600M (build guard 1201M > 1024M)
+2026-10-26 15:57:25 PAUSE (SIGSTOP) pid=24377 clang mem=600M (build guard 1201M > 1024M)
+2026-10-26 15:57:29 RESUME (SIGCONT) pid=24369 clang after 3s (build guard: room under 1024M)
+2026-10-26 15:57:34 forget pid=24377 (exited)
+2026-10-26 15:58:43 MODE ? -> build
+2026-10-26 15:58:43 LEVEL ? -> green: level=green mode=build swap=261M free=6303M avail=9664M pressure=1 swapout=0MB/tick paused=0
+2026-10-26 15:58:45 PREDICT exhaustion in 51s (avail 9215M) -> orange early
+2026-10-26 15:58:45 LEVEL green -> orange: level=orange mode=build swap=261M free=5854M avail=9215M pressure=1 swapout=0MB/tick paused=0
+2026-10-26 15:58:46 RENICE +10 pid=29882 clang mem=500M (level orange)
+2026-10-26 15:58:46 BACKGROUND pid=29882 clang mem=500M (level orange)
+2026-10-26 15:58:46 PAUSE (SIGSTOP) pid=29882 clang mem=500M (level orange, largest process)
+2026-10-26 15:58:47 PREDICT exhaustion in 58s (avail 8868M) -> orange early
+2026-10-26 15:58:50 PREDICT exhaustion in 87s (avail 8872M) -> orange early
+2026-10-26 15:58:53 PREDICT exhaustion in 116s (avail 8869M) -> orange early
+2026-10-26 15:58:55 PREDICT exhaustion in 144s (avail 8861M) -> orange early
+2026-10-26 15:58:58 PREDICT exhaustion in 166s (avail 8825M) -> orange early
+2026-10-26 16:01:15 MODE ? -> normal
+2026-10-26 16:01:15 LEVEL ? -> green: level=green mode=normal swap=261M free=6166M avail=9624M pressure=1 swapout=0MB/tick paused=0
+2026-10-26 16:01:19 BACKGROUND pid=33139 spin mem=0M (cpu 199% > 150% for 4s)
+2026-10-26 16:01:24 THROTTLE pid=33139 spin cpu=170% -> 50% duty (cpu 170% still > 150%)
+2026-10-26 16:01:31 UNTHROTTLE pid=33139 spin (manual)

@@ -1,0 +1,21 @@
+#!/bin/sh
+# Removes memguard completely and undoes every change it made. Resumes anything it paused first.
+D=~/Developer/MacMemoryManager
+/usr/bin/python3 "$D/memguard.py" off            # resumes paused, removes background QoS, stops CPU throttles
+osascript -e 'quit app "MemGuard"' 2>/dev/null; pkill -x MemGuard 2>/dev/null
+for L in com.user.memguard com.user.memguard.menubar; do
+  launchctl bootout gui/$(id -u)/$L 2>/dev/null; rm -f ~/Library/LaunchAgents/$L.plist
+done
+rm -rf ~/Applications/MemGuard.app ~/.local/bin/memguard "$D/state/.probe"
+defaults delete com.apple.dt.Xcode IDEBuildOperationMaxNumberOfConcurrentCompileTasks 2>/dev/null
+defaults delete com.brave.Browser HighEfficiencyModeEnabled 2>/dev/null
+DD=~/Library/Developer/Xcode/DerivedData
+tmutil removeexclusion "$DD" 2>/dev/null; rm -f "$DD/.metadata_never_index"
+for d in ~/Developer/XDAW/auto-src/build ~/Developer/XDAW/src/build ~/Developer/MYAPP/build ~/Developer/MYAPP/apps/macos/.build \
+         ~/Developer/MYAPP/packages/core/node_modules ~/Developer/MYAPP/.worktrees/learning/build ~/Developer/MYAPP/.worktrees/builder/build \
+         ~/Developer/MYAPP/.worktrees/builder/packages/core/node_modules ~/Developer/MYAPP/.worktrees/builder/apps/macos/.build ~/Developer/MYAPP/.cache; do
+  [ -d "$d" ] && tmutil removeexclusion "$d" 2>/dev/null
+done
+# agents memguard disabled stay disabled until you re-enable them:  launchctl enable gui/$(id -u)/<label>
+grep -h "MAINT disabled agent" "$D/logs/memguard.log"* 2>/dev/null | sed 's/.*agent /  disabled by memguard: /' 
+echo "memguard uninstalled. (Folder $D left in place; trash it if you like.)"

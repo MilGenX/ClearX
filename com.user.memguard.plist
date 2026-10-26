@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.user.memguard</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/bin/python3</string>
+    <string>~/Developer/MacMemoryManager/memguard.py</string>
+    <string>tick</string>
+  </array>
+  <key>StartInterval</key><integer>10</integer>
+  <key>RunAtLoad</key><true/>
+  <key>ProcessType</key><string>Interactive</string>
+  <key>StandardOutPath</key><string>~/Developer/MacMemoryManager/logs/launchd.out</string>
+  <key>StandardErrorPath</key><string>~/Developer/MacMemoryManager/logs/launchd.err</string>
+</dict>
+</plist>

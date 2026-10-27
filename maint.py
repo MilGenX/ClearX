@@ -473,6 +473,15 @@ def ssd_write_read():
     return best
 
 
+def available():
+    """What Finder shows as available: free + purgeable ("available for important usage"), via Foundation (JXA)."""
+    imp = sh("osascript", "-l", "JavaScript", "-e",
+             "ObjC.import('Foundation');var u=$.NSURL.fileURLWithPath('/');var v=Ref();"
+             "u.getResourceValueForKeyError(v,$.NSURLVolumeAvailableCapacityForImportantUsageKey,null);"
+             "ObjC.unwrap(v[0]).toString()", timeout=20).strip()
+    return max(int(imp) if imp.isdigit() else 0, shutil.disk_usage("/System/Volumes/Data").free)
+
+
 def drive_info():
     """The boot drive: type (SSD / Fusion / HDD), protocol, SMART, TRIM, model, free and purgeable space."""
     di = sh("diskutil", "info", "/")
@@ -483,12 +492,7 @@ def drive_info():
     fusion = g("Fusion Drive") == "Yes"
     kind = "Fusion Drive" if fusion else ("SSD" if g("Solid State") == "Yes" else "HDD")
     d = shutil.disk_usage("/System/Volumes/Data")
-    # free incl. purgeable ("available for important usage") via Foundation, through JXA
-    imp = sh("osascript", "-l", "JavaScript", "-e",
-             "ObjC.import('Foundation');var u=$.NSURL.fileURLWithPath('/');var v=Ref();"
-             "u.getResourceValueForKeyError(v,$.NSURLVolumeAvailableCapacityForImportantUsageKey,null);"
-             "ObjC.unwrap(v[0]).toString()", timeout=20).strip()
-    important = int(imp) if imp.isdigit() else d.free
+    important = available()
     r = dict(kind=kind, protocol=g("Protocol"), smart=g("SMART Status") or "?", trim=trim.group(1) if trim else "?",
              model=model.group(1).strip() if model else "?", size=d.total, free=d.free,
              purgeable=max(0, important - d.free), checked=time.time())
@@ -727,7 +731,7 @@ def optimize(storage_info=None, apply=False, log=print):
     nd, n1 = _rss(r"(^|/)node$")
     py, n2 = _rss(r"(^|/)[Pp]ython[0-9.]*$")
     add("Background", "node / python processes left running", f"node {n1} ({human(nd)}), python {n2} ({human(py)})",
-        "info" if n1 + n2 else "ok", "memguard status  # Quit the ones you don't need from the menu")
+        "info" if n1 + n2 else "ok", "clearx status  # Quit the ones you don't need from the menu")
     gd, n = _rss(r"Google Drive")
     add("Background", "Google Drive", f"{human(gd)} RAM" if n else "not running", "info" if n else "ok",
         "Google Drive > Settings > Google Drive: Stream files (not Mirror) keeps the disk and RAM lower")
@@ -736,7 +740,7 @@ def optimize(storage_info=None, apply=False, log=print):
     dd = _defaults("com.apple.dt.Xcode", "IDECustomDerivedDataLocation")
     jobs = _defaults("com.apple.dt.Xcode", "IDEBuildOperationMaxNumberOfConcurrentCompileTasks")
     idx = _defaults("com.apple.dt.Xcode", "IDEIndexDisable")
-    add("Dev", "Xcode/xcodebuild parallel compiles", f"{jobs} (set by memguard from the pool: 4 healthy, 4 yellow, 2 pressure/hot (8 with more RAM))",
+    add("Dev", "Xcode/xcodebuild parallel compiles", f"{jobs} (set by ClearX from the pool: 4 healthy, 4 yellow, 2 pressure/hot or while you work; 8 with more RAM)",
         "applied", "", "fewer compiles at once under pressure = no swap thrash")
     add("Dev", "Xcode DerivedData location", dd or "default (~/Library/Developer/Xcode/DerivedData, internal SSD)", "ok")
     add("Dev", "Xcode indexing", "disabled" if idx in ("1", "YES") else "on (Xcode pauses it while building)", "ok")
@@ -750,9 +754,8 @@ def optimize(storage_info=None, apply=False, log=print):
             iv = plistlib.load(f).get("StartInterval")
     except OSError:
         iv = None
-    add("Dev", "MyDAW auto-update interval", f"every {iv // 60} min" if iv else "unknown", "info",
-        "suggestion only (XDAW is not edited by memguard): 15-30 min is plenty; each check that finds a new commit "
-        "starts a full Release build")
+    add("Dev", "MyDAW auto-update interval", (f"checks every {iv // 60} min, " if iv else "") + "builds at most every 15 min (Intel only)",
+        "ok", "", "each build is the Mac's biggest memory load; commits that land meanwhile go into the next build")
 
     # browser
     bdir = HOME + "/Library/Application Support/BraveSoftware/Brave-Browser"
@@ -923,8 +926,9 @@ def fix(what, log):
 
 # ---------- "Reach N GB free" plan: candidates with sizes and one action each; nothing is deleted here ----------
 def storage_plan(maint, goal_gb=250):
-    d = shutil.disk_usage("/System/Volumes/Data")
-    goal = goal_gb << 30
+    # in Finder's terms, so "250 GB free" here is 250 GB available in Finder: decimal GB, free + purgeable
+    free = available()
+    goal = goal_gb * 10 ** 9
     items = []
     add = lambda id_, title, size, how, action, note="": items.append(
         dict(id=id_, title=title, size=size, how=how, action=action, note=note))
@@ -933,7 +937,10 @@ def storage_plan(maint, goal_gb=250):
         # the Media screen), so that folder is never suggested; old archives next to it are
         for top in glob.glob(acct + "/.shortcut-targets-by-id/*/*") + glob.glob(acct + "/My Drive"):
             for sub in sorted(glob.glob(top + "/*")) or [top]:
-                if not os.path.isdir(sub) or os.path.basename(sub) == "MyDAW Library":
+                # never MyDAW Library, anything inside it (the shared folder itself can be MyDAW Library), or a folder
+                # that holds it
+                if not os.path.isdir(sub) or "MyDAW Library" in sub.split("/") or \
+                        glob.glob(glob.escape(sub) + "/MyDAW Library") or glob.glob(glob.escape(sub) + "/*/MyDAW Library"):
                     continue
                 sz = du(sub)
                 if sz >= 1 << 30:
@@ -967,5 +974,5 @@ def storage_plan(maint, goal_gb=250):
         add("trash", "Trash", tr, "Finder › Empty Trash (permanent).", "open:" + TRASH)
     items.sort(key=lambda i: -i["size"])
     total = sum(i["size"] for i in items)
-    return dict(goal=goal, free=d.free, gap=max(0, goal - d.free), candidates=total,
-                reachable=d.free + total >= goal, items=items, t=time.time())
+    return dict(goal=goal, free=free, gap=max(0, goal - free), candidates=total,
+                reachable=free + total >= goal, items=items, t=time.time(), decimal=True)

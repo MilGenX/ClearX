@@ -1,0 +1,28 @@
+== memguard v3 self-test 2026-10-26 20:00:30 (isolated state /var/folders/hq/vzvp949n259g2mcvc5q0vqcc0000gn/T/mg-selftest-3jwfb17i)
+
+-- 1. interactive-aware builds (fake clang, 300 MB)
+you're active (idle 5 s): clang background QoS = True (interactive: you're using the Mac); Xcode jobs for next build = 2
+you're away (idle 300 s): clang still backgrounded = False
+
+-- 2. RAM reserve (target forced above what's ready, so it must escalate)
+stages over 4 ticks: [3, 3, 3, 3]; ready 3967 MB, target 15360 MB, reachable=False; Xcode jobs = 2; clang backgrounded = False
+target lowered to 1 GB: stage back to 0
+
+-- 3. App Freezer (TextEdit as the fake app) + wake on activation by MemGuard.app
+TextEdit pid 19426: frozen processes = 1, ps stat = T
+activated TextEdit: running again after 397 ms (open -a + activation + MemGuard.app SIGCONT); stat = S
+MemGuard.app wake.log: 2026-10-27T00:01:27Z woke TextEdit (1 processes) in 0.13 ms
+daemon next tick: TextEdit still listed as frozen = False
+front app this tick: TextEdit (never frozen); pids holding power assertions: 4
+re-frozen = True; with MemGuard.app 'not running' the daemon woke it: stat = S
+
+-- 4. Reach 250 GB plan
+free 87 GB, gap 162 GB, candidates 142 GB, reachable=False
+   103 GB  Google Drive folder “Tracks” is stored on this Mac
+    17 GB  iOS simulators and iPhone debug symbols (Xcode)
+    11 GB  Claude app data (includes its local VM image)
+     8 GB  Autodesk app data
+     1 GB  Codex runtimes cache
+
+== results: {"interactive_active": true, "interactive_idle": true, "reserve_escalates": true, "reserve_releases": true, "freeze": true, "wake": true, "watchdog": true, "plan": true}
+ALL PASS

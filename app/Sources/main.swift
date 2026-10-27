@@ -1032,10 +1032,13 @@ struct StoragePage: View {
             Card("Health and speed") {
                 CheckLine(ok: true, text: "Type: \(d["kind"] as? String ?? "?") (\(d["model"] as? String ?? "?"), \(d["protocol"] as? String ?? "?")), a fast internal drive, not the old Fusion/hard-drive kind.")
                 CheckLine(ok: (d["smart"] as? String) == "Verified", text: "Health check (SMART): \(d["smart"] as? String ?? "?")\((d["smart"] as? String) == "Verified" ? ", no signs of failure." : "")")
+                if let wear = d["wear_pct"] as? Int {
+                    CheckLine(ok: wear < 50, text: "Wear: \(wear)% of the drive's life used (\(gb(num(d["lifetime_written"]))) written so far, about \(gb(num(d["endurance"]))) in total).")
+                }
                 CheckLine(ok: (d["trim"] as? String) == "Yes", text: "TRIM: \(d["trim"] as? String ?? "?")\((d["trim"] as? String) == "Yes" ? ", keeps the drive fast as it fills." : "")")
                 if !sp.isEmpty { CheckLine(ok: true, text: "Measured speed: writes \(num(sp["write_mb_s"])) MB/s. Fast enough; an external drive wouldn't help.") }
                 CheckLine(ok: num(days[today]) <= 100 << 30,
-                          text: "Drive writes today: \(gb(num(days[today]))) (swap \(gb(num((ssd["swap_days"] as? [String: Any])?[today])))). Writes are what wear an SSD; a typical 512 GB SSD is rated for about 300 TB, so a few tens of GB a day lasts many years. ClearX keeps them down: 2 compile jobs while you work, apps frozen only while compression has room, Brave's disk cache capped at 300 MB.")
+                          text: "Drive writes today: \(gb(num(days[today]))) (swap \(gb(num((ssd["swap_days"] as? [String: Any])?[today])))). Writes are what wear an SSD; the wear line above is the drive's own measurement. ClearX keeps them down: 2 compile jobs while you work, apps frozen only while compression has room, Brave's disk cache capped at 300 MB.")
                 Text("Reads today don't wear the drive: \(gb(num(ssd["boot_r"]))) since the last restart.")
                     .font(.system(size: 11)).foregroundColor(Theme.sub)
             }

@@ -1395,6 +1395,9 @@ def maintain(args):
         dr = S["drive"]
         print(f"  {dr['kind']} {dr['model']} ({dr['protocol']}), SMART {dr['smart']}, TRIM {dr['trim']}; "
               f"{H(dr['free'])} free + {H(dr['purgeable'])} purgeable of {H(dr['size'])}")
+        if dr.get("wear_pct") is not None:
+            print(f"  wear: {dr['wear_pct']}% of its life used; {H(dr['lifetime_written'])} written, "
+                  f"{H(dr['lifetime_read'])} read over {dr['power_on_hours']} powered-on hours (endurance ~{H(dr.get('endurance', 0))})")
         if S.get("speed"):
             print(f"  speed: write {S['speed']['write_mb_s']} MB/s, read {S['speed']['read_mb_s']} MB/s (2 GB file)")
         print(f"  local snapshots: {len(S['snapshots'])}" + "".join(f"\n    {x['volume']}: {x['name']}" for x in S["snapshots"]))

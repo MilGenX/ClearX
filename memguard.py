@@ -142,6 +142,11 @@ def log(msg):
 def notify(title, msg):
     if _conf and not _conf.getboolean("general", "notify", fallback=True):
         return
+    if subprocess.run(["pgrep", "-x", "ClearX"], capture_output=True).returncode == 0:
+        # ClearX.app posts it (its own name and icon; osascript notifications show Script Editor's)
+        with open(os.path.join(STATE_DIR, "notify.json"), "w") as f:
+            json.dump(dict(title=title, msg=msg, t=time.time()), f)
+        return
     esc = lambda s: s.replace("\\", "\\\\").replace('"', '\\"')
     subprocess.run(["osascript", "-e",
                     f'display notification "{esc(msg)}" with title "ClearX" subtitle "{esc(title)}"'],
@@ -694,10 +699,19 @@ def tick(dry=False, force=None):
     procs = proc_list()
     compilers = globs(conf.get("build_guard", "compilers", fallback=""))
     build_tools = globs(conf.get("modes", "build_tools", fallback=""))
-    near = lvl >= 1 or pool["swap_active"] or st.get("paused") or st.get("throttled") or pool["tight"] \
-        or any(matches(p["name"], compilers) for p in procs.values())
-    if near:
+    # top's footprint is ~70% of a tick's CPU. Footprint-based choices (pause, budgets) only happen when the pool is
+    # yellow+, swapping or tight; held processes and a build on a green pool don't need it (compiler RSS is its
+    # footprint), so then refresh it at most every footprint_s instead of every tick.
+    near = lvl >= 1 or pool["swap_active"] or st.get("throttled") or pool["tight"]
+    calm_near = st.get("paused") or any(matches(p["name"], compilers) for p in procs.values())
+    if near or (calm_near and now - st.get("footprint_t", 0) >= float(P.get("footprint_s", 60))):
+        st["footprint_t"] = now
         add_footprint(procs)
+        st["footprint"] = {str(p["pid"]): p["mem"] for p in procs.values() if p["mem"] > p["rss"] + (32 << 20)}
+    else:  # between refreshes: the last footprint where it exceeded RSS (compressed/swapped memory)
+        fp = st.get("footprint", {})
+        for p in procs.values():
+            p["mem"] = max(p["mem"], fp.get(str(p["pid"]), 0))
     mode = detect_mode(conf, procs, st)
     if mode != st.get("mode"):
         log(f"MODE {st.get('mode', '?')} -> {mode}")
@@ -802,7 +816,6 @@ def tick(dry=False, force=None):
     if spd < 100:
         if st.get("thermal_ok", True):
             log(f"THERMAL throttling: CPU_Speed_Limit={spd} scheduler={pool['sched']}")
-            notify("CPU thermal throttling", f"speed limit {spd}%")
             st["thermal_since"] = now
         st["thermal_ok"] = False
         if now - st.get("thermal_since", now) >= float(P.get("thermal_ui_after_s", 60)):
@@ -812,11 +825,60 @@ def tick(dry=False, force=None):
     elif not st.get("thermal_ok", True):
         log(f"THERMAL ok again (speed limit {spd})")
         st["thermal_ok"] = True
+    # brief dips are normal under load; notify only when throttling is sustained (every sample below 100 and
+    # the average below notify_below for notify_after_s), at most once per notify_every_s
+    win = float(P.get("thermal_notify_after_s", 120))
+    sh_ = [x for x in st.get("spd_hist", []) if now - x[0] <= win + 15] + [[round(now, 1), spd]]
+    st["spd_hist"] = sh_
+    st["thermal_sustained"] = now - sh_[0][0] >= win and all(s < 100 for _, s in sh_) \
+        and sum(s for _, s in sh_) / len(sh_) < float(P.get("thermal_notify_below", 90))
+    if st["thermal_sustained"] and now - st.get("thermal_notified", 0) >= float(P.get("thermal_notify_every_s", 3600)):
+        st["thermal_notified"] = now
+        notify("Your Mac got warm", "ClearX eased off background work (fewer build jobs, background apps "
+                                    "at low priority) until it cools down.")
+
+    # 2b. heat: the i9 runs hot under sustained all-core load long before macOS lowers CPU_Speed_Limit, so act
+    #     on sustained load: fewer compile jobs for the next build, background QoS for known background hogs.
+    #     Between cool_pct and hot_pct neither timer runs (hysteresis); released after cool_s below cool_pct.
+    Hc = conf["heat"] if conf.has_section("heat") else {}
+    if str(Hc.get("enabled", "true")).lower() == "true":
+        cpu = pool["cpu_load"]
+        if cpu >= float(Hc.get("hot_pct", 70)):
+            st.setdefault("heat_since", now); st.pop("cool_since", None)
+        elif cpu < float(Hc.get("cool_pct", 45)):
+            st.setdefault("cool_since", now); st.pop("heat_since", None)
+        else:
+            st.pop("heat_since", None); st.pop("cool_since", None)
+        if spd < 100:  # macOS is already slowing the CPU: heat mode now, and no release until it stops
+            st.setdefault("heat_since", now - float(Hc.get("sustain_s", 30))); st.pop("cool_since", None)
+        if not st.get("heat_on") and now - st.get("heat_since", now) >= float(Hc.get("sustain_s", 30)):
+            st["heat_on"] = True
+            log(f"HEAT: CPU load {cpu}% sustained -> {Hc.get('jobs', 6)} compile jobs, background hogs")
+        elif st.get("heat_on") and now - st.get("cool_since", now) >= float(Hc.get("cool_s", 120)):
+            st["heat_on"] = False
+            log(f"HEAT over: CPU load {cpu}%")
+            for k, info in list(st.get("bg", {}).items()):
+                if info.get("why", "").startswith("heat"):
+                    unbackground(int(k), st, "cooled down", dry=dry)
+        if st.get("heat_on"):
+            for p in bgc:
+                if matches(p["name"], globs(Hc.get("background", "photoanalysisd, mediaanalysisd, Google Drive*, cloudd"))):
+                    background(p, st, dry, f"heat: CPU load {cpu}%")
+            # automatic builders/test runners (e.g. a node --test run spawning one worker per core): their workers
+            # live seconds, so lower the long-lived parents too; nice and background QoS carry over to new children
+            bp = globs(conf.get("interactive", "build_paths", fallback="/auto-src/, /.worktrees/builder/"))
+            for p in elig:
+                if any(x in p["path"] for x in bp) and "T" not in p["stat"]:
+                    if p["nice"] < 10:
+                        renice(p, dry, f"heat: auto-builder, CPU load {cpu}%")
+                    background(p, st, dry, f"heat: auto-builder, CPU load {cpu}%")
 
     # Xcode parallelism for the next build follows the pool: 8 healthy, 4 yellow, 2 orange+/throttling
     J = lambda k, d: int(P.get(k, d))
     want = J("jobs_pressure", 2) if (lvl >= 2 or spd < 100) else J("jobs_normal", 4) if lvl == 1 \
         else J("jobs_healthy", 8)
+    if st.get("heat_on"):
+        want = min(want, int(Hc.get("jobs", 6)))
     if stage >= 3:  # reserve: builds give way (2 jobs, background QoS)
         want = min(want, 2)
         for p in procs.values():

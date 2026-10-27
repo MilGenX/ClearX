@@ -812,7 +812,7 @@ def tick(dry=False, force=None):
             updater = tree(procs, auto)  # MyDAW's auto-update build and tests, from the moment they start
             for p in procs.values():
                 if (matches(p["name"], compilers) or p["pid"] in updater) and p["pid"] not in fg and "T" not in p["stat"]:
-                    background(p, st, dry, "interactive: you're using the Mac" + (" (MyDAW auto-update)" if p["pid"] in updater else ""))
+                    background(p, st, dry, "interactive: you're using the Mac" + (" (auto-builder)" if p["pid"] in updater else ""))
         elif idle >= float(I.get("idle_s", 120)):
             for k, info in list(st.get("bg", {}).items()):
                 if info.get("why", "").startswith("interactive"):

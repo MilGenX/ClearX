@@ -907,11 +907,14 @@ def tick(dry=False, force=None):
     calm = m["pressure"] == 1 and swapping_mb < 1 and m["avail"] >= size(R["resume_free"])
     if force:
         calm = lvl == 0
-    if lvl == 0 and calm:
+    # resume only after a steady green (a paused process's memory gets swapped out; resuming it right before the
+    # next orange swaps it back in: pause/resume flapping is pure SSD churn), then don't re-pause it for a while
+    steady = now - st.get("level_since", now) >= conf.getfloat("resume", "steady_s", fallback=60)
+    if lvl == 0 and calm and steady:
         pp = [(k, i) for k, i in st.get("paused", {}).items() if i.get("kind") not in ("build", "freeze")]
         if pp:
             k, info = min(pp, key=lambda kv: kv[1].get("mem", 0))
-            resume(int(k), st, "pool healthy", dry=dry)
+            resume(int(k), st, "pool healthy", dry=dry, cooldown_s=conf.getfloat("resume", "repause_cooldown_min", fallback=10) * 60)
         elif now - st.get("level_since", now) >= conf.getfloat("resume", "unbackground_after_s", fallback=60):
             for k, info in list(st.get("bg", {}).items()):
                 w = info.get("why", "")

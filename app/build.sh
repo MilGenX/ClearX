@@ -3,7 +3,8 @@
 set -e
 cd "$(dirname "$0")"
 APP=build/ClearX.app
-rm -rf "$APP"; mkdir -p "$APP/Contents/MacOS"
+rm -rf "$APP"; mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+cp ClearX.icns "$APP/Contents/Resources/ClearX.icns"
 xcrun swiftc -O -parse-as-library -target x86_64-apple-macos13.0 -o "$APP/Contents/MacOS/ClearX" Sources/*.swift
 cat > "$APP/Contents/Info.plist" <<PL
 <?xml version="1.0" encoding="UTF-8"?>
@@ -14,6 +15,7 @@ cat > "$APP/Contents/Info.plist" <<PL
   <key>CFBundleExecutable</key><string>ClearX</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>3.1</string>
+  <key>CFBundleIconFile</key><string>ClearX</string>
   <key>CFBundleDisplayName</key><string>ClearX</string>
   <key>LSMinimumSystemVersion</key><string>13.0</string>
   <key>LSUIElement</key><true/>

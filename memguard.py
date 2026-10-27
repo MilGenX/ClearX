@@ -365,6 +365,9 @@ def eligible(procs, conf, st, include_paused=False):
     # [protected] apps: the app and everything it starts (MyApp: its node server, voice ID, tunnel)
     apps = globs(conf.get("protected", "apps", fallback=""))
     ptree = tree(procs, [p["pid"] for p in procs.values() if matches(p["name"], apps)]) if apps else set()
+    # build tests (MyDAW's audio timing tests): a paused test fails, and a failed test keeps the update out
+    ptree |= tree(procs, [p["pid"] for p in procs.values()
+                          if matches(p["name"], globs(conf.get("interactive", "tests", fallback="ctest, *_tests")))])
     rx = conf.get("test", "target_regex", fallback="").strip()
     me = {os.getpid(), os.getppid()}
     paused = {int(k) for k in st.get("paused", {})}
@@ -779,8 +782,14 @@ def tick(dry=False, force=None):
         need = sum(procs[x]["mem"] for x in fg) + sum(p["mem"] for p in procs.values()
                                                        if matches(p["name"], compilers) and p["pid"] not in fg)
         ceiling = int(sh("sysctl", "-n", "hw.memsize").strip()) - m["wired"] - m["compressed"] - need
+        # which build holds the reserve down (the menu says so calmly instead of a red cross)
+        builds = [p for p in procs.values() if is_build(p)]
+        build = "" if not builds else "Building MyDAW" if any("/XDAW/" in p["path"] or "/XDAW/" in cmdline(p["pid"])
+                                                           for p in builds[:6]) \
+            else "Building MyApp" if any("/MYAPP/" in p["path"] or "/MYAPP/" in cmdline(p["pid"]) for p in builds[:6]) \
+            else "A build is running"
         st["reserve"] = dict(target=target, ready=ready, need=need, ceiling=ceiling, ok=ready >= target,
-                             reachable=ceiling >= target)
+                             reachable=ceiling >= target, build=build)
         stage = st.get("reserve_stage", 0)
         if ready < target:
             # unreachable (what you're using + the build need more): freeze idle hidden apps only, don't throttle the
@@ -891,6 +900,8 @@ def tick(dry=False, force=None):
         st["hid_idle"] = round(idle)
         if idle < float(I.get("active_s", 60)):  # you're using the Mac: builds yield to you
             want = min(want, int(I.get("active_jobs", 4)))
+            if stage >= 1:  # reserve short while you work: the next build step gets 1 job (never SIGSTOP: a
+                want = 1    # stopped compiler keeps its RAM and it gets swapped out, i.e. SSD writes)
             bp = globs(I.get("build_paths", "/auto-src/, /.worktrees/builder/"))
             auto = [p["pid"] for p in procs.values() if "mydaw-auto-update" in p["path"] or any(x in p["path"] for x in bp) or
                     (p["name"] in ("zsh", "bash", "sh") and "mydaw-auto-update" in cmdline(p["pid"]))] \

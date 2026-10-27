@@ -9,13 +9,20 @@ struct ReserveRow: View {
         if let r = m.reserve {
             let target = num(r["target"]), ready = num(r["ready"])
             let ok = r["ok"] as? Bool ?? false, reachable = r["reachable"] as? Bool ?? true
+            let build = r["build"] as? String ?? "", building = !ok && !build.isEmpty
             HStack(spacing: 8) {
-                Image(systemName: ok ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
-                    .foregroundColor(ok ? Theme.accent : Theme.warn)
+                Image(systemName: ok ? "checkmark.circle.fill" : building ? "hammer" : "exclamationmark.circle.fill")
+                    .foregroundColor(ok ? Theme.accent : building ? Theme.sub : Theme.warn)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text("Reserve: \(gb(target)) \(ok ? "✓" : "✗") · \(gb(ready)) ready now")
-                        .font(.system(size: 12, weight: .semibold)).foregroundColor(Theme.text)
-                    if !ok {
+                    if building {  // a build is the only reason: calm, not an alarm
+                        Text("\(build) · \(gb(ready)) free now · back to \(gb(target)) when the build finishes")
+                            .font(.system(size: 12, weight: .semibold)).foregroundColor(Theme.text)
+                            .fixedSize(horizontal: false, vertical: true)
+                    } else {
+                        Text("Reserve: \(gb(target)) \(ok ? "✓" : "✗") · \(gb(ready)) ready now")
+                            .font(.system(size: 12, weight: .semibold)).foregroundColor(Theme.text)
+                    }
+                    if !ok && !building {
                         Text(reachable ? "Freezing hidden apps and slowing builds to get back to \(gb(target))."
                                        : "What you're using plus the build needs more than that. The reserve comes back when the build finishes.")
                             .font(.system(size: 11)).foregroundColor(Theme.sub).fixedSize(horizontal: false, vertical: true)

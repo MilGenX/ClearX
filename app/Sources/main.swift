@@ -1129,19 +1129,34 @@ struct OptimizeView: View {
             if mm.optimize.isEmpty { Text("Click Measure to see what can be tuned.").foregroundColor(Theme.sub) }
             ForEach(Array(mm.optimize.enumerated()), id: \.offset) { _, i in
                 let st = i["status"] as? String ?? ""
-                let good = ["ok", "applied", "n/a"].contains(st)
-                VStack(alignment: .leading, spacing: 2) {
+                // plain words: OK / Fixed / Needs you / Info
+                let word = st == "ok" || st == "n/a" ? "OK" : st == "applied" ? "Fixed" :
+                    ["needs OK", "needs you"].contains(st) ? "Needs you" : "Info"
+                let a = i["action"] as? String ?? ""
+                let isCommand = a.range(of: #"(^|\s)(sudo|brew|defaults|kmutil|systemextensionsctl|clearx|memguard|cmake|xcrun)\s"#,
+                                        options: .regularExpression) != nil || a.contains(" | ")
+                VStack(alignment: .leading, spacing: 3) {
                     HStack(alignment: .top, spacing: 8) {
-                        Text(st).font(.system(size: 10, weight: .semibold))
-                            .foregroundColor(good ? Theme.accent : st == "hardware" ? Theme.info : Theme.warn)
+                        Text(word).font(.system(size: 10, weight: .semibold))
+                            .foregroundColor(word == "OK" || word == "Fixed" ? Theme.accent : word == "Needs you" ? Theme.warn : Theme.info)
                             .padding(.horizontal, 6).padding(.vertical, 2).background(Capsule().fill(Theme.line))
                             .frame(width: 72, alignment: .leading)
-                        Text("\(i["title"] as? String ?? ""): \(i["measured"] as? String ?? "")").foregroundColor(Theme.text)
-                            .fixedSize(horizontal: false, vertical: true)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(i["title"] as? String ?? "").font(.system(size: 12, weight: .semibold)).foregroundColor(Theme.text)
+                            Text(i["measured"] as? String ?? "").font(.system(size: 11)).foregroundColor(Theme.sub)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
                     }
-                    if !good, let a = i["action"] as? String, !a.isEmpty {
-                        Text("→ " + a).foregroundColor(Theme.sub).textSelection(.enabled).padding(.leading, 80)
-                            .fixedSize(horizontal: false, vertical: true)
+                    if word == "Needs you" || word == "Info", !a.isEmpty {
+                        if isCommand {
+                            DisclosureGroup("Show command") {
+                                Text(a).font(.system(size: 11, design: .monospaced)).foregroundColor(Theme.sub)
+                                    .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                            }.font(.system(size: 11)).foregroundColor(Theme.sub).padding(.leading, 80)
+                        } else {
+                            Text(a).font(.system(size: 11)).foregroundColor(Theme.sub).padding(.leading, 80)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
                     }
                 }.font(.system(size: 12))
             }

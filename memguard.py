@@ -626,7 +626,8 @@ def freeze_tick(conf, st, procs, lvl, fpid, daws, compilers, now, dry, reserve_s
         return 0
     idle_s = float(F.get("idle_min", 5)) * 60 if reserve_stage < 4 else float(F.get("recent_min", 1)) * 60
     min_mem = size(F.get("min_mem", "300M"))
-    never = globs(F.get("never", "")) + protected_set(conf) + daws + compilers
+    # [protected] apps (MyApp: its server, voice ID and phone tunnel must keep answering) are never frozen either
+    never = globs(F.get("never", "")) + protected_set(conf) + daws + compilers + globs(conf.get("protected", "apps", fallback=""))
     renderer_only = globs(F.get("renderer_only", "Brave Browser, Google Chrome"))
     held = assertion_pids()
     busy_net = net_active(st, now)
@@ -813,6 +814,12 @@ def tick(dry=False, force=None):
                                    compilers, now, dry, stage)
     elig = [p for p in eligible(procs, conf, st) if p["pid"] not in fg]
     bgc = [p for p in elig if not is_build(p)]          # the background class
+    # apps you can see (and their helpers: tab renderers, WebKit/GPU processes) are never paused for pressure: a
+    # paused helper is a frozen or blank window, and only the App Freezer knows to wake it when you switch to it
+    gui = tree(procs, [a["pid"] for a in gui_apps() if a["pid"] in procs])
+    # macOS's own services (/System, /usr) are lowered in priority but never paused: apps wait on them, so a paused
+    # system service turns into a beachball in whatever app asked it something
+    pausable = [p for p in bgc if p["pid"] not in gui and not p["path"].startswith(("/System/", "/usr/", "/Library/Apple/"))]
     gpu_heavy = globs(conf.get("vram", "gpu_heavy", fallback=""))
     acts = []
 
@@ -922,6 +929,16 @@ def tick(dry=False, force=None):
                     continue
                 if (matches(p["name"], compilers) or p["pid"] in updater) and p["pid"] not in fg and "T" not in p["stat"]:
                     background(p, st, dry, "interactive: you're using the Mac" + (" (auto-builder)" if p["pid"] in updater else ""))
+            # local AI servers (MyApp's llama-server): never paused, but while you work in another app they run at
+            # background QoS so the app in front stays snappy; full speed when their app is in front or you're away
+            ai = [p for p in procs.values() if matches(p["name"], globs(I.get("ai_servers", "llama-server, ollama*")))]
+            owner_front = fpid in procs and matches(procs[fpid]["name"], globs(conf.get("protected", "apps", fallback="")))
+            for p in ai:
+                if owner_front:
+                    if st.get("bg", {}).get(str(p["pid"]), {}).get("why", "").startswith("interactive: AI"):
+                        unbackground(p["pid"], st, "its app is in front", dry=dry)
+                else:
+                    background(p, st, dry, "interactive: AI server while you use another app")
         elif idle >= float(I.get("idle_s", 120)):
             for k, info in list(st.get("bg", {}).items()):
                 if info.get("why", "").startswith("interactive"):
@@ -953,8 +970,8 @@ def tick(dry=False, force=None):
                 for p in group:
                     renice(p, dry, f"budget {pat}")
                     background(p, st, dry, f"budget {pat}")
-            elif lvl >= 2 and group:
-                top = max(group, key=lambda p: p["mem"])
+            elif lvl >= 2 and [p for p in group if p["pid"] not in gui]:
+                top = max((p for p in group if p["pid"] not in gui), key=lambda p: p["mem"])
                 if pause(top, st, dry, f"budget {pat} {total >> 20}M > {limit >> 20}M"):
                     bgc = [p for p in bgc if p["pid"] != top["pid"]]
         else:
@@ -967,14 +984,20 @@ def tick(dry=False, force=None):
             if matches(p["name"], heavy) or p["mem"] >= size(L["red_proc_min"]):
                 renice(p, dry, f"level {level}")
                 background(p, st, dry, f"level {level}")
-    if lvl == 2 and bgc:
-        top = max(bgc, key=lambda p: p["mem"])
+    pausable = [p for p in pausable if str(p["pid"]) not in st.get("paused", {})]
+    if lvl == 2 and pausable:
+        top = max(pausable, key=lambda p: p["mem"])
         if top["mem"] >= size(P.get("pause_min", "200M")):
             pause(top, st, dry, "pool orange, largest background process")
     if lvl == 3:
-        for p in sorted(bgc, key=lambda p: -p["mem"]):
+        for p in sorted(pausable, key=lambda p: -p["mem"]):
             if p["mem"] >= size(L["red_proc_min"]):
                 pause(p, st, dry, f"pool red, >= {L['red_proc_min']}")
+
+    for k, info in list(st.get("paused", {}).items()):
+        if info.get("kind") == "pressure" and (int(k) in gui or (procs.get(int(k)) or {}).get("path", "").startswith(
+                ("/System/", "/usr/", "/Library/Apple/"))):
+            resume(int(k), st, "app on screen or macOS service: never paused for pressure", dry=dry)
 
     # compilers paused for pressure (by older versions, or by hand-off) belong to the build guard
     for k, info in st.get("paused", {}).items():

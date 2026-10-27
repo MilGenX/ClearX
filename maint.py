@@ -725,13 +725,22 @@ def optimize(storage_info=None, apply=False, log=print):
     add("Background", "Homebrew services running", ", ".join(started) or "none", "ok" if not started else "info",
         "brew services stop <name>")
     vm, n = _rss(r"com\.apple\.Virtualization\.VirtualMachine")
-    add("Background", "Virtual machines", f"{n} running, {human(vm)}", "ok" if not n else "needs OK",
+    add("Background", "Virtual machines", f"{n} running, {human(vm)}" + (" (Claude's sandbox: fine, no cap needed)"
+        if n == 1 and vm < 1536 << 20 else ""), "ok" if not n or vm < 1536 << 20 else "needs OK",
         "cap the VM's memory in its app (e.g. 2 GB for a Linux VM; Docker Desktop: Settings > Resources)",
         "each GB capped is a GB the pool keeps")
     nd, n1 = _rss(r"(^|/)node$")
     py, n2 = _rss(r"(^|/)[Pp]ython[0-9.]*$")
-    add("Background", "node / python processes left running", f"node {n1} ({human(nd)}), python {n2} ({human(py)})",
-        "info" if n1 + n2 else "ok", "clearx status  # Quit the ones you don't need from the menu")
+    owners = {}
+    for ln in sh("ps", "-axo", "comm=").splitlines():  # who runs them: decided by where the program lives
+        c = ln.strip()
+        if re.search(r"(^|/)(node|[Pp]ython[0-9.]*)$", c):
+            o = "MyApp app" if "/MyApp.app/" in c else "MyApp builder" if "/MYAPP/" in c else \
+                "Claude" if "Claude" in c or "/.claude/" in c else "ClearX" if "MacMemoryManager" in c else "other"
+            owners[o] = owners.get(o, 0) + 1
+    add("Background", "node / python processes", f"node {n1} ({human(nd)}), python {n2} ({human(py)}): " +
+        ", ".join(f"{k} {v}" for k, v in sorted(owners.items(), key=lambda kv: -kv[1])),
+        "info" if n1 + n2 else "ok", "They belong to the apps listed; quit those apps to end them")
     gd, n = _rss(r"Google Drive")
     add("Background", "Google Drive", f"{human(gd)} RAM" if n else "not running", "info" if n else "ok",
         "Google Drive > Settings > Google Drive: Stream files (not Mirror) keeps the disk and RAM lower")
@@ -745,7 +754,8 @@ def optimize(storage_info=None, apply=False, log=print):
     add("Dev", "Xcode DerivedData location", dd or "default (~/Library/Developer/Xcode/DerivedData, internal SSD)", "ok")
     add("Dev", "Xcode indexing", "disabled" if idx in ("1", "YES") else "on (Xcode pauses it while building)", "ok")
     cc = shutil.which("ccache") or os.path.exists("/usr/local/bin/ccache")
-    add("Dev", "ccache for the MyDAW build", "installed" if cc else "not installed", "ok" if cc else "needs OK",
+    add("Dev", "ccache for the MyDAW build", ("installed" if cc else "not set up") + ": skipped on purpose, MyDAW would "
+        "have to switch build systems (Xcode to Ninja) and that's not worth the risk now", "ok" if cc else "info",
         "brew install ccache; then in XDAW's build script: cmake -G Ninja -DCMAKE_C_COMPILER_LAUNCHER=ccache "
         "-DCMAKE_CXX_COMPILER_LAUNCHER=ccache (the Xcode generator ignores compiler launchers)",
         "a rebuild after a pull recompiles only what changed: typically minutes become seconds for JUCE")
@@ -808,8 +818,10 @@ def optimize(storage_info=None, apply=False, log=print):
             "larger and are downsampled, costing VRAM and GPU time")
     ws = _cpu(r"WindowServer")
     rt = _defaults("com.apple.universalaccess", "reduceTransparency")
-    add("Display", "WindowServer CPU / Reduce transparency", f"{ws:.0f}% CPU, reduce transparency {'on' if rt == '1' else 'off'}",
-        "ok" if rt == "1" else "needs you", "System Settings > Accessibility > Display > Reduce transparency")
+    # rt is None when macOS privacy hides the setting from this process (e.g. run from the ClearX app): unknown, not off
+    add("Display", "WindowServer CPU / Reduce transparency",
+        f"{ws:.0f}% CPU, reduce transparency " + {"1": "on", "0": "off"}.get(rt, "on (or hidden by macOS privacy)"),
+        "needs you" if rt == "0" else "ok", "System Settings > Accessibility > Display > Reduce transparency")
 
     # thermal
     fan = os.path.isdir("/Applications/Macs Fan Control.app")
@@ -837,7 +849,8 @@ def optimize(storage_info=None, apply=False, log=print):
             f"~{(wr_.get('endurance', 0) - wr_['lifetime_written']) / max(rate, 1) / 365:.1f} years of days like this one, "
             "and much longer with normal idle days.") if wr_ else
             "Real wear needs SMART: brew install smartmontools")(ssd_wear()))
-    add("Hardware", "RAM", f"{', '.join(sizes) or '?'} in {len(sizes)} of 4 slots, {spd}; "
+    gbs = [int(re.match(r"(\d+)", x).group(1)) for x in sizes if re.match(r"(\d+)", x)]
+    add("Hardware", "RAM", f"{sum(gbs)} GB installed ({len(gbs)} × {gbs[0] if gbs else '?'} GB) · {4 - len(gbs)} empty slots, {spd}; "
         f"{human(so)} swapped out since boot ({human(so / days)}/day)", "hardware",
         "32 GB: 2x16 GB DDR4-2666 PC4-21300 260-pin SO-DIMM in the empty slots, or 4x8/4x16 GB (Apple's max is 64 GB); "
         "rear hatch above the power port, no tools beyond a coin",
@@ -881,6 +894,10 @@ def needs(maint, st):
         add("updates", f"Install {main['title']}" + (" and restart" if any(u.get("restart") for u in up) else ""),
             "Open Software Update", "open:x-apple.systempreferences:com.apple.Software-Update-Settings.extension")
     pm = sh("pmset", "-g")
+    sl = re.search(r"^\s*sleep\s+(\d+)", pm, re.M)
+    if sl and 0 < int(sl.group(1)) < 10:
+        add("sleep", f"Your Mac goes to sleep after {sl.group(1)} min, which can pause long builds and downloads",
+            "Fix", "fix:sleep")
     hm = re.search(r"^\s*hibernatemode\s+(\d+)", pm, re.M)
     if hm and hm.group(1) != "0":
         add("hibernate", "Stop writing a 16 GB copy of memory to your drive every time the Mac sleeps",
@@ -893,7 +910,7 @@ def needs(maint, st):
     if caches and caches["size"] >= 500 << 20:
         add("caches", f"Free {human(caches['size'])} of old app caches (moved to the Trash)", "Clean", "fix:caches")
     if subprocess.run(["defaults", "read", "com.apple.universalaccess", "reduceTransparency"],
-                      capture_output=True, text=True).stdout.strip() != "1":
+                      capture_output=True, text=True).stdout.strip() == "0":  # unreadable (privacy) is not "off"
         add("transparency", "Turn on Reduce transparency so the screen uses less graphics power", "Open Settings",
             "open:x-apple.systempreferences:com.apple.Accessibility-Settings.extension")
     ui = re.search(r"UI Looks like: (\d+) x (\d+)", sh("system_profiler", "SPDisplaysDataType", timeout=30))
@@ -916,6 +933,13 @@ def fix(what, log):
                            capture_output=True, text=True)
         ok = r.returncode == 0
         log(f"MAINT fix hibernate: {'hibernatemode 0' if ok else 'cancelled'}  (undo: sudo pmset -a hibernatemode 3)")
+        return ok
+    if what == "sleep":  # a desktop: the computer never sleeps on its own (the display still does)
+        r = subprocess.run(["osascript", "-e", 'do shell script "/usr/bin/pmset -a sleep 0" with prompt '
+                            '"ClearX wants to stop the Mac sleeping by itself (the screen still turns off)." '
+                            'with administrator privileges'], capture_output=True, text=True)
+        ok = r.returncode == 0
+        log(f"MAINT fix sleep: {'sleep 0' if ok else 'cancelled'}  (undo: sudo pmset -a sleep 1)")
         return ok
     if what == "simulators":
         return subprocess.run(["xcrun", "simctl", "delete", "unavailable"], capture_output=True, timeout=120).returncode == 0

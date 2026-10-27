@@ -11,6 +11,7 @@ defaults delete com.apple.dt.Xcode IDEBuildOperationMaxNumberOfConcurrentCompile
 defaults delete com.brave.Browser HighEfficiencyModeEnabled 2>/dev/null
 defaults delete com.brave.Browser MemorySaverModeSavings 2>/dev/null
 defaults delete com.brave.Browser BackgroundModeEnabled 2>/dev/null
+defaults delete com.brave.Browser DiskCacheSize 2>/dev/null
 defaults delete com.xdaw.app NSAppSleepDisabled 2>/dev/null          # App Nap back to the default for MyDAW
 launchctl unsetenv CMAKE_BUILD_PARALLEL_LEVEL; launchctl unsetenv MAKEFLAGS   # (memguard off does this too)
 DD=~/Library/Developer/Xcode/DerivedData

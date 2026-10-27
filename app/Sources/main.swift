@@ -1035,7 +1035,9 @@ struct StoragePage: View {
                 CheckLine(ok: (d["trim"] as? String) == "Yes", text: "TRIM: \(d["trim"] as? String ?? "?")\((d["trim"] as? String) == "Yes" ? ", keeps the drive fast as it fills." : "")")
                 if !sp.isEmpty { CheckLine(ok: true, text: "Measured speed: writes \(num(sp["write_mb_s"])) MB/s. Fast enough; an external drive wouldn't help.") }
                 CheckLine(ok: num(days[today]) <= 100 << 30,
-                          text: "Written today: \(gb(num(days[today]))) (since the last restart \(gb(num(ssd["boot_w"])))). Most of this is memory overflow (swap); ClearX keeps it down, and more RAM would end it.")
+                          text: "Drive writes today: \(gb(num(days[today]))) (swap \(gb(num((ssd["swap_days"] as? [String: Any])?[today])))). Writes are what wear an SSD; a typical 512 GB SSD is rated for about 300 TB, so a few tens of GB a day lasts many years. ClearX keeps them down: 2 compile jobs while you work, apps frozen only while compression has room, Brave's disk cache capped at 300 MB.")
+                Text("Reads today don't wear the drive: \(gb(num(ssd["boot_r"]))) since the last restart.")
+                    .font(.system(size: 11)).foregroundColor(Theme.sub)
             }
             Card("") { StoragePlanView(mm: mm) }
             Card("What's using space") {

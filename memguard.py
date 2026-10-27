@@ -607,7 +607,12 @@ def freeze_tick(conf, st, procs, lvl, fpid, daws, compilers, now, dry, reserve_s
     held = assertion_pids()
     busy_net = net_active(st, now)
     since = st.get("front_track_t", now)
-    frozen_roots = {i.get("root") for i in frozen.values()}
+    frozen_roots = {i.get("root") for i in frozen.values()} | {i.get("app_pid") for i in frozen.values()}
+    # prefer compression: freezing helps while the compressor can absorb what goes cold; when it's nearly full,
+    # whatever gets frozen goes straight to swap (SSD writes), so stop adding to it
+    m_ = metrics()
+    if m_["compressed"] >= size(F.get("compressor_max", "4G")):
+        return 0
     n = 0
     for a in gui_apps():
         if a["pid"] == fpid or a["pid"] not in procs or a["pid"] in frozen_roots or matches(a["name"], never):
@@ -1149,7 +1154,14 @@ def track_ssd():
     days = t.setdefault("days", {})
     days[day] = days.get(day, 0) + inc
     t["days"] = dict(sorted(days.items())[-30:])
-    t["boot_w"], t["boot_r"], t["t"] = w, r, time.time()
+    so = int((re.search(r"Swapouts:\s+(\d+)", sh("vm_stat")) or [0, 0])[1]) * PAGE
+    lso = t.get("last_so")
+    sinc = (so if last is None else 0) if lso is None else (so - lso if so >= lso else so)
+    t["last_so"] = so
+    sw = t.setdefault("swap_days", {})
+    sw[day] = sw.get(day, 0) + sinc
+    t["swap_days"] = dict(sorted(sw.items())[-30:])
+    t["boot_w"], t["boot_r"], t["boot_swap"], t["t"] = w, r, so, time.time()
     save_maint(d)
 
 

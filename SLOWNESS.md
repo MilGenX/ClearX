@@ -31,3 +31,39 @@ in **bursts**: 6.1 GB out and 4.8 GB in, almost all in two 1-minute spikes. Quie
 5. Hardware limits of this 2019 Intel iMac: 16 GB RAM (an 8B local AI model plus builds plus browsers is more than
    16 GB can hold without swapping), an i9 that throttles under long all-core load in the iMac's case, and no Apple
    Silicon efficiency. Software can choose **who waits**; it can't make 16 GB hold 22 GB.
+
+## After (b801): measured 2026-10-27 03:17–03:37 (EDT), 20 minutes, same sampler and metrics
+
+MyApp b801 is live: tests have a 2-minute limit and run 2 at a time, the builder runs only when you're idle or MyApp is in
+front, and the local AI is Qwen3-4B with `-t 4`. Same method as above (`bench/slowness-sample.py 1200`). Rates are
+normalised to the first sample's 15 minutes where marked.
+
+| Metric | Before (15 min, 00:31) | After b801 (20 min, 03:17) | Change |
+|---|---|---|---|
+| Drive writes | 18.9 GB (75 GB/h) | 1.9 GB (5.6 GB/h) | **−93 %** |
+| Worst minute of writes | 5.8 GB/min | 0.9 GB/min | −84 % |
+| Swap-out (per 15 min) | 6.1 GB | 0.65 GB | **−89 %** |
+| Swap-in (per 15 min) | 4.8 GB | 0.2 GB | −96 % |
+| node processes started | 489 | 0 among the top spawners | gone |
+| node CPU (share of one core) | 83 % | 1.3 % | −98 % |
+| llama-server CPU | 87 % (8B, 8 threads) | below 0.3 % (4B, 4 threads) | not like-for-like: the AI was idle during this window |
+| Heat throttling (CPU speed limit) | min 74 %, 7 of 90 samples | 100 % in all 120 samples | **none** |
+| Load average | avg 9.1, max 37.5 | avg 1.6, max 3.1 | −82 % |
+| Ready memory (free + cache) | min 3.1, avg 5.1 GB | min 3.6, avg 5.9 GB | better |
+| Memory pressure index | avg 29 %, max 33 % | avg 35 %, max 39 % | **worse** (see below) |
+
+**About the pressure index.** It's macOS's "how hard it's working to find memory" figure. It rose while ready memory,
+swap and writes all improved. The likely reason is a different mix of open apps: an MyDAW build and its tests were running in
+this window, and Brave was open. 35–39 % is still in macOS's normal range (no warning level was reached, and no orange
+or red pool state occurred). It is the one metric that didn't improve, so it's reported as is.
+
+### Still slow, ranked
+1. **MyDAW's auto-update build and tests.** clang used 26 % of a core on average; XDAW's test programs wrote 0.35 GB.
+   The only swap burst of the window (0.9 GB in one minute at 03:22) lines up with it. Proposal for XDAW (another
+   thread, not edited here): run its builder only when you're idle, like MyApp b801.
+2. **16 GB with everything open.** Ready memory dips to 3.6 GB with Brave, Claude, MyApp and an MyDAW build at once. That's
+   the hardware ceiling; software decides who waits.
+3. **Minor:** Spotlight started 99 mdworker processes (0.7 % CPU in total); Brave's tab renderers used 5 %. Nothing to fix.
+
+In short, the big stalls (drive-write storms, heat throttling, swap bursts from MyApp's tests and AI) are gone. What's
+left is MyDAW's own build when it runs, and 16 GB's limit when everything is open at once.

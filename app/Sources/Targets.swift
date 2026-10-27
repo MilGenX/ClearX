@@ -40,7 +40,7 @@ struct StoragePlanView: View {
                 Button(mm.busy ?? "Work it out") { mm.run("Measuring…", ["plan", "250"]) }.disabled(mm.busy != nil)
             }
             if p.isEmpty {
-                Text("Click “Work it out” to see what it would take.").foregroundColor(.secondary)
+                Text("Click “Work it out” to see what it would take.").foregroundColor(Theme.sub)
             } else {
                 let reachable = p["reachable"] as? Bool ?? false
                 Text("Free now \(gb(num(p["free"]))). Needed: \(gb(num(p["gap"]))) more. Everything below adds up to \(gb(num(p["candidates"]))): " +
@@ -49,14 +49,14 @@ struct StoragePlanView: View {
                 ForEach(Array(items.enumerated()), id: \.offset) { _, i in
                     VStack(alignment: .leading, spacing: 2) {
                         HStack {
-                            Text(i["title"] as? String ?? "").bold()
+                            Text(i["title"] as? String ?? "").bold().foregroundColor(Theme.text)
                             Spacer()
                             Text(gb(num(i["size"]))).monospacedDigit()
-                            Button("Show") { act(i["action"] as? String ?? "") }.buttonStyle(.borderless)
+                            Button("Show") { act(i["action"] as? String ?? "") }
                         }
-                        Text(i["how"] as? String ?? "").font(.caption).foregroundColor(.secondary).fixedSize(horizontal: false, vertical: true)
+                        Text(i["how"] as? String ?? "").font(.caption).foregroundColor(Theme.sub).fixedSize(horizontal: false, vertical: true)
                         if let n = i["note"] as? String, !n.isEmpty {
-                            Text(n).font(.caption).foregroundColor(.orange).fixedSize(horizontal: false, vertical: true)
+                            Text(n).font(.caption).foregroundColor(Theme.warn).fixedSize(horizontal: false, vertical: true)
                         }
                     }.padding(.vertical, 2)
                 }

@@ -59,7 +59,8 @@ struct StoragePlanView: View {
                             Text(i["title"] as? String ?? "").bold().foregroundColor(Theme.text)
                             Spacer()
                             Text(gbd(num(i["size"]))).monospacedDigit()
-                            Button("Show") { act(i["action"] as? String ?? "") }
+                            Button((i["action"] as? String ?? "").hasPrefix("fix:") ? "Remove…" : "Show") { act(i["action"] as? String ?? "") }
+                                .disabled(mm.busy != nil)
                         }
                         Text(i["how"] as? String ?? "").font(.caption).foregroundColor(Theme.sub).fixedSize(horizontal: false, vertical: true)
                         if let n = i["note"] as? String, !n.isEmpty {
@@ -73,5 +74,6 @@ struct StoragePlanView: View {
     func act(_ a: String) {
         if a.hasPrefix("reveal:") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: String(a.dropFirst(7)))]) }
         else if a.hasPrefix("open:") { NSWorkspace.shared.open(URL(fileURLWithPath: String(a.dropFirst(5)))) }
+        else if a == "fix:iosdev" { mm.confirmIOSDev() }
     }
 }

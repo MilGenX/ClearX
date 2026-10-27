@@ -139,7 +139,7 @@ def scan_junk():
     except (ValueError, AttributeError):
         pass
     cats.append(dict(id="optional", title="Optional: iOS dev data (only if you don't need it)", items=opt,
-                     action="command", command="see each item"))
+                     action="fix:iosdev", command="clearx maintain fix iosdev"))
 
     cats.append(dict(id="trash", title="Trash (already deleted; empty it in Finder)",
                      items=[item(TRASH)] if os.path.isdir(TRASH) else [], action="none"))
@@ -921,6 +921,21 @@ def fix(what, log):
         return subprocess.run(["xcrun", "simctl", "delete", "unavailable"], capture_output=True, timeout=120).returncode == 0
     if what == "caches":
         return clean(["caches"], log) >= 0
+    if what == "iosdev":  # on the user's click, after a confirm in the app: returns (freed now, moved to Trash)
+        before = available()
+        sh("xcrun", "simctl", "shutdown", "all", timeout=120)
+        sh("xcrun", "simctl", "delete", "all", timeout=600)
+        try:  # with no simulators left, every runtime is unused
+            for rid in json.loads(sh("xcrun", "simctl", "runtime", "list", "-j", timeout=60) or "{}"):
+                sh("xcrun", "simctl", "runtime", "delete", rid, timeout=600)
+        except (ValueError, TypeError):
+            pass
+        trashed = sum(move_to_trash(d, log) for d in glob.glob(HOME + "/Library/Developer/Xcode/iOS DeviceSupport/*"))
+        time.sleep(5)  # runtime images unmount and go a moment after the delete
+        freed = max(0, available() - before)
+        log(f"MAINT fix iosdev: simulators and runtimes deleted ({human(freed)} freed), iOS DeviceSupport "
+            f"{human(trashed)} to the Trash")
+        return freed, trashed
     return False
 
 
@@ -955,7 +970,7 @@ def storage_plan(maint, goal_gb=250):
     if ios >= 1 << 30:
         add("iosdev", "iOS simulators and iPhone debug symbols (Xcode)", ios,
             "Only if you no longer test MyApp on the iOS simulator: Xcode › Settings › Platforms › delete old iOS runtimes.",
-            "open:/Applications/Xcode-16.4.app", "MyApp's iOS work uses these; they download again when needed (slowly).")
+            "fix:iosdev", "MyApp's iOS work uses these; they download again when needed (slowly).")
     for p, title, how in ((HOME + "/Library/Application Support/Autodesk", "Autodesk app data",
                            "If you no longer use Autodesk apps, uninstall them with Clean up › Uninstall."),
                           (HOME + "/.cache/codex-runtimes", "Codex runtimes cache", "Safe to remove; re-downloaded when used."),

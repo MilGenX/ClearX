@@ -463,6 +463,16 @@ def health(st, maint):
 
 
 # ---------- storage ----------
+def ssd_write_read():
+    out = sh("ioreg", "-r", "-c", "IOBlockStorageDriver", "-w0")
+    best = (0, 0)
+    for blk in re.findall(r'"Statistics" = \{([^}]*)\}', out):
+        w_ = re.search(r'"Bytes \(Write\)"=(\d+)', blk); r_ = re.search(r'"Bytes \(Read\)"=(\d+)', blk)
+        if w_ and r_ and int(w_.group(1)) + int(r_.group(1)) > sum(best):
+            best = (int(w_.group(1)), int(r_.group(1)))
+    return best
+
+
 def drive_info():
     """The boot drive: type (SSD / Fusion / HDD), protocol, SMART, TRIM, model, free and purgeable space."""
     di = sh("diskutil", "info", "/")
@@ -791,12 +801,16 @@ def optimize(storage_info=None, apply=False, log=print):
     vs = sh("vm_stat")
     so = int((re.search(r"Swapouts:\s+(\d+)", vs) or [0, 0])[1]) * 4096
     days = max(0.01, (time.time() - boot_t) / 86400)
-    io = re.findall(r"([\d.]+)\s*$", sh("iostat", "-d", "-I", "disk0").strip())
-    disk_io = float(io[-1]) * (1 << 20) if io else 0
-    add("Storage", "SSD traffic since boot (reads + writes, mostly swap)",
-        f"{human(disk_io)} in {days * 24:.1f} h ({human(disk_io / days)}/day)",
-        "info" if disk_io / days < 200 << 30 else "hardware",
-        "swap traffic is SSD wear; more RAM is the fix (see RAM below)")
+    w, r = ssd_write_read()
+    swap_w = so
+    rate = w / days
+    add("Storage", "Drive writes since boot (what wears an SSD; reads don't)",
+        f"{human(w)} written in {days * 24:.1f} h, {human(swap_w)} of it swap; {human(r)} read (no wear)",
+        "info" if rate < 100 << 30 else "applied",
+        "", f"ClearX cuts the writes: 2 compile jobs while you work, apps frozen only while the compressor has room, "
+        f"Brave disk cache capped at 300 MB. If every hour were like the last {days * 24:.1f} h ({human(rate)}/day), a "
+        f"typical 512 GB SSD (~300 TB rated) would last ~{300 * (1 << 40) / max(rate, 1) / 365:.1f} years; a normal day "
+        "with idle hours and nights is far lower. The real wear level needs SMART: brew install smartmontools")
     add("Hardware", "RAM", f"{', '.join(sizes) or '?'} in {len(sizes)} of 4 slots, {spd}; "
         f"{human(so)} swapped out since boot ({human(so / days)}/day)", "hardware",
         "32 GB: 2x16 GB DDR4-2666 PC4-21300 260-pin SO-DIMM in the empty slots, or 4x8/4x16 GB (Apple's max is 64 GB); "

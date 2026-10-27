@@ -1144,7 +1144,8 @@ struct MemGuardApp: App {
             Panel(m: m)
         } label: {
             HStack(spacing: 3) {
-                Image(nsImage: dotImage(m.color))
+                Image(nsImage: turbineImage())
+                if m.level != "green" { Image(nsImage: dotImage(m.color)) }
                 Text(String(format: "%.1fG", Double(m.availB) / 1073741824))
             }
         }

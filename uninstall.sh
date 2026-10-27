@@ -24,4 +24,5 @@ done
 # agents memguard disabled stay disabled until you re-enable them:  launchctl enable gui/$(id -u)/<label>
 grep -h "MAINT disabled agent" "$D/logs/memguard.log"* 2>/dev/null | sed 's/.*agent /  disabled by memguard: /' 
 echo "Note: if you clicked Fix for the sleep file, undo it with: sudo pmset -a hibernatemode 3"
+echo "smartmontools (installed for the SSD wear reading) stays; remove with: brew uninstall smartmontools"
 echo "ClearX uninstalled. (Folder $D left in place; trash it if you like.)"

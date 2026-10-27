@@ -489,9 +489,29 @@ def drive_info():
              "u.getResourceValueForKeyError(v,$.NSURLVolumeAvailableCapacityForImportantUsageKey,null);"
              "ObjC.unwrap(v[0]).toString()", timeout=20).strip()
     important = int(imp) if imp.isdigit() else d.free
-    return dict(kind=kind, protocol=g("Protocol"), smart=g("SMART Status") or "?", trim=trim.group(1) if trim else "?",
-                model=model.group(1).strip() if model else "?", size=d.total, free=d.free,
-                purgeable=max(0, important - d.free), checked=time.time())
+    r = dict(kind=kind, protocol=g("Protocol"), smart=g("SMART Status") or "?", trim=trim.group(1) if trim else "?",
+             model=model.group(1).strip() if model else "?", size=d.total, free=d.free,
+             purgeable=max(0, important - d.free), checked=time.time())
+    r.update(ssd_wear())
+    return r
+
+
+def ssd_wear():
+    """Real wear from the drive's SMART log (needs smartmontools: brew install smartmontools). NVMe data units are
+    512,000 bytes. Endurance is derived from the drive's own 'Percentage Used' instead of a guessed TBW rating."""
+    sc = next((x for x in ("/usr/local/bin/smartctl", "/opt/homebrew/bin/smartctl") if os.path.exists(x)), None)
+    if not sc:
+        return {}
+    out = sh(sc, "-a", "disk0", timeout=30)
+    num = lambda k: int(re.search(rf"{k}:\s+([\d,]+)", out).group(1).replace(",", "")) if re.search(rf"{k}:\s+([\d,]+)", out) else None
+    used, wr, rd, hrs = num("Percentage Used"), num("Data Units Written"), num("Data Units Read"), num("Power On Hours")
+    if used is None or wr is None:
+        return {}
+    w = wr * 512000
+    res = dict(wear_pct=used, lifetime_written=w, lifetime_read=(rd or 0) * 512000, power_on_hours=hrs)
+    if used > 0:
+        res["endurance"] = int(w * 100 / used)
+    return res
 
 
 def speed_test(mb=2048):
@@ -808,9 +828,12 @@ def optimize(storage_info=None, apply=False, log=print):
         f"{human(w)} written in {days * 24:.1f} h, {human(swap_w)} of it swap; {human(r)} read (no wear)",
         "info" if rate < 100 << 30 else "applied",
         "", f"ClearX cuts the writes: 2 compile jobs while you work, apps frozen only while the compressor has room, "
-        f"Brave disk cache capped at 300 MB. If every hour were like the last {days * 24:.1f} h ({human(rate)}/day), a "
-        f"typical 512 GB SSD (~300 TB rated) would last ~{300 * (1 << 40) / max(rate, 1) / 365:.1f} years; a normal day "
-        "with idle hours and nights is far lower. The real wear level needs SMART: brew install smartmontools")
+        "Brave disk cache capped at 300 MB. " + (lambda wr_: (
+            f"The drive itself reports {wr_['wear_pct']}% of its life used after {human(wr_['lifetime_written'])} written "
+            f"(about {human(wr_.get('endurance', 0))} in total); at {human(rate)}/day the rest lasts "
+            f"~{(wr_.get('endurance', 0) - wr_['lifetime_written']) / max(rate, 1) / 365:.1f} years of days like this one, "
+            "and much longer with normal idle days.") if wr_ else
+            "Real wear needs SMART: brew install smartmontools")(ssd_wear()))
     add("Hardware", "RAM", f"{', '.join(sizes) or '?'} in {len(sizes)} of 4 slots, {spd}; "
         f"{human(so)} swapped out since boot ({human(so / days)}/day)", "hardware",
         "32 GB: 2x16 GB DDR4-2666 PC4-21300 260-pin SO-DIMM in the empty slots, or 4x8/4x16 GB (Apple's max is 64 GB); "

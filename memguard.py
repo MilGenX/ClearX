@@ -424,6 +424,8 @@ def unbackground(pid, st, why, dry=False):
 
 
 def pause(p, st, dry, why, kind="pressure"):
+    if p["name"].startswith("com.apple.WebKit.") and why != "manual":
+        return False  # XPC helpers of MyApp/Safari: freezing them blanks pages (renice/QoS still fine)
     if not dry:
         try:
             os.kill(p["pid"], signal.SIGSTOP)
@@ -752,6 +754,9 @@ def tick(dry=False, force=None):
         if int(k) not in procs:
             st["paused"].pop(k)
             log(f"forget pid={k} (exited)")
+    for k, info in list(st.get("paused", {}).items()):
+        if info["name"].startswith("com.apple.WebKit.") and info.get("why") != "manual":
+            resume(int(k), st, "WebKit helpers are never paused")
     for k in list(st.get("bg", {})):
         if int(k) not in procs:
             st["bg"].pop(k)

@@ -39,7 +39,7 @@ from the foreground Terminal still counts as a build).
 
 | Situation | What memguard does, in order |
 |---|---|
-| Pool healthy (green, not swapping, ≥ 1.5 GB available) | Releases everything: resumes paused processes one per tick (smallest first), removes background QoS after 60 s calm, and sets Xcode to **8** parallel compiles for the next build |
+| Pool healthy (green, not swapping, ≥ 1.5 GB available) | Releases everything: resumes paused processes one per tick (smallest first), removes background QoS after 60 s calm, and sets Xcode to **4** parallel compiles for the next build (MyDAW compile jobs use ~1.4 GB each; 8 = ~11 GB) |
 | Yellow (swap ≥ 2 GB while swapping, or pressure warn) | Soft budgets apply; heavy and ≥ 500 MB background processes get `renice 10` + background QoS. Xcode cap **4**. Build mode backgrounds Brave |
 | Orange (swap ≥ 3 GB while swapping, free < 1 GB while swapping, or exhaustion predicted < 60 s) | Also pauses the largest background process (≥ 200 MB). The compiler memory budget halves. Xcode cap **2** |
 | Red (swap ≥ 3.5 GB while swapping, or pressure critical) | Pauses every background process ≥ 500 MB; compiler budget is a quarter (the oldest job always runs) |
@@ -51,7 +51,7 @@ from the foreground Terminal still counts as a build).
 The state only steps down one level per tick, so it doesn't flap between orange and green when
 swap-outs pause for a moment. The Xcode cap goes down at once and up only after 60 s.
 
-**Xcode parallelism.** memguard writes `IDEBuildOperationMaxNumberOfConcurrentCompileTasks` (8 / 4 / 2)
+**Xcode parallelism.** memguard writes `IDEBuildOperationMaxNumberOfConcurrentCompileTasks` (4 / 4 / 2)
 from the pool. Xcode and xcodebuild read it when a build *starts*, so it sets the next build's parallelism.
 For a build that's already running, the build guard does the live work (pausing the newest compile jobs).
 `memguard off` deletes the key (Xcode's own default: one compile per CPU thread).
@@ -132,7 +132,7 @@ Trash). Its root helper needs your password: `sudo ~/Developer/MacMemoryManager/
   build gets at most 4 jobs. After 2 min without input, they get full speed again.
 - **Build caps at the source.** With the Xcode cap, memguard also sets `CMAKE_BUILD_PARALLEL_LEVEL` and
   `MAKEFLAGS=-jN` in the launchd environment (`launchctl setenv`), so `cmake --build` and `make` started from
-  launchd agents (like MyDAW's auto-update), Finder or new Terminal windows follow the same 8/4/2 cap.
+  launchd agents (like MyDAW's auto-update), Finder or new Terminal windows follow the same 4/4/2 cap.
   `memguard off` and `uninstall.sh` unset them.
 - **Other user-level settings** (all removed by `uninstall.sh`): Brave `MemorySaverModeSavings = 2` (maximum)
   and `BackgroundModeEnabled = false` (Brave doesn't keep running after its last window closes); check
@@ -245,7 +245,7 @@ signals being sent.
 ## Other system changes (all reversed by uninstall.sh)
 
 - `com.apple.dt.Xcode IDEBuildOperationMaxNumberOfConcurrentCompileTasks` is now set by the daemon from
-  the pool (8 / 4 / 2) and read by Xcode/xcodebuild when each build starts. `memguard off` and
+  the pool (4 / 4 / 2) and read by Xcode/xcodebuild when each build starts. `memguard off` and
   `uninstall.sh` delete it.
 - `defaults write com.brave.Browser HighEfficiencyModeEnabled -bool true` (Memory Saver policy).
   Brave's own setting was already on (`high_efficiency_mode state=2`). Check `brave://policy`

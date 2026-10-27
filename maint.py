@@ -706,7 +706,7 @@ def optimize(storage_info=None, apply=False, log=print):
     dd = _defaults("com.apple.dt.Xcode", "IDECustomDerivedDataLocation")
     jobs = _defaults("com.apple.dt.Xcode", "IDEBuildOperationMaxNumberOfConcurrentCompileTasks")
     idx = _defaults("com.apple.dt.Xcode", "IDEIndexDisable")
-    add("Dev", "Xcode/xcodebuild parallel compiles", f"{jobs} (set by memguard from the pool: 8 healthy, 4 yellow, 2 pressure/hot)",
+    add("Dev", "Xcode/xcodebuild parallel compiles", f"{jobs} (set by memguard from the pool: 4 healthy, 4 yellow, 2 pressure/hot (8 with more RAM))",
         "applied", "", "fewer compiles at once under pressure = no swap thrash")
     add("Dev", "Xcode DerivedData location", dd or "default (~/Library/Developer/Xcode/DerivedData, internal SSD)", "ok")
     add("Dev", "Xcode indexing", "disabled" if idx in ("1", "YES") else "on (Xcode pauses it while building)", "ok")

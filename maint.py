@@ -16,7 +16,7 @@ CACHE_SKIP = {"Homebrew", "pip", "Yarn", "com.apple.dt.Xcode", "CloudKit", "com.
 
 def sh(*a, timeout=120):
     try:
-        return subprocess.run(a, capture_output=True, text=True, timeout=timeout).stdout
+        return subprocess.run(a, capture_output=True, timeout=timeout).stdout.decode("utf-8", errors="replace")
     except (subprocess.TimeoutExpired, OSError):
         return ""
 
@@ -856,6 +856,11 @@ def needs(maint, st):
                       capture_output=True, text=True).stdout.strip() != "1":
         add("transparency", "Turn on Reduce transparency so the screen uses less graphics power", "Open Settings",
             "open:x-apple.systempreferences:com.apple.Accessibility-Settings.extension")
+    ui = re.search(r"UI Looks like: (\d+) x (\d+)", sh("system_profiler", "SPDisplaysDataType", timeout=30))
+    if ui and (int(ui.group(1)), int(ui.group(2))) != (2560, 1440):
+        add("scaling", f"Your screen is set to look like {ui.group(1)} x {ui.group(2)}, which makes the graphics card draw "
+            "a bigger picture and shrink it. Default is sharper and lighter", "Open Settings",
+            "open:x-apple.systempreferences:com.apple.Displays-Settings.extension")
     d = shutil.disk_usage("/System/Volumes/Data")
     if d.free < 40 << 30:
         add("disk", f"Your drive is getting full ({human(d.free)} free): memory overflow needs room", "See storage",
@@ -872,6 +877,53 @@ def fix(what, log):
         ok = r.returncode == 0
         log(f"MAINT fix hibernate: {'hibernatemode 0' if ok else 'cancelled'}  (undo: sudo pmset -a hibernatemode 3)")
         return ok
+    if what == "simulators":
+        return subprocess.run(["xcrun", "simctl", "delete", "unavailable"], capture_output=True, timeout=120).returncode == 0
     if what == "caches":
         return clean(["caches"], log) >= 0
     return False
+
+
+# ---------- "Reach N GB free" plan: candidates with sizes and one action each; nothing is deleted here ----------
+def storage_plan(maint, goal_gb=250):
+    d = shutil.disk_usage("/System/Volumes/Data")
+    goal = goal_gb << 30
+    items = []
+    add = lambda id_, title, size, how, action, note="": items.append(
+        dict(id=id_, title=title, size=size, how=how, action=action, note=note))
+    for acct in glob.glob(HOME + "/Library/CloudStorage/GoogleDrive-*"):
+        for top in glob.glob(acct + "/.shortcut-targets-by-id/*/*") + glob.glob(acct + "/My Drive"):
+            sz = du(top)
+            if sz >= 1 << 30:
+                add("drive:" + os.path.basename(top), f"Google Drive folder “{os.path.basename(top)}” is stored on this Mac",
+                    sz, "In Finder, right-click the folder › Remove download (or Google Drive › Settings › Google Drive › "
+                    "Stream files). It stays in Drive and downloads again when opened.", "reveal:" + top,
+                    "MyDAW reads its songs from ~/Music/X DAW Songs, which is a separate copy; check before removing "
+                    "if anything opens these files straight from Drive." if "Tracks" in top else "")
+    ios = du(HOME + "/Library/Developer/CoreSimulator/Devices") + du(HOME + "/Library/Developer/Xcode/iOS DeviceSupport")
+    rt = re.search(r"Total Disk Images: \d+ \(([\d.]+)G\)", sh("xcrun", "simctl", "runtime", "list", timeout=60))
+    ios += int(float(rt.group(1)) * (1 << 30)) if rt else 0
+    if ios >= 1 << 30:
+        add("iosdev", "iOS simulators and iPhone debug symbols (Xcode)", ios,
+            "Only if you no longer test MyApp on the iOS simulator: Xcode › Settings › Platforms › delete old iOS runtimes.",
+            "open:/Applications/Xcode-16.4.app", "MyApp's iOS work uses these; they download again when needed (slowly).")
+    for p, title, how in ((HOME + "/Library/Application Support/Autodesk", "Autodesk app data",
+                           "If you no longer use Autodesk apps, uninstall them with Clean up › Uninstall."),
+                          (HOME + "/.cache/codex-runtimes", "Codex runtimes cache", "Safe to remove; re-downloaded when used."),
+                          (HOME + "/Library/Application Support/Claude", "Claude app data (includes its local VM image)",
+                           "Claude › Settings can reset local data; most of it is the sandbox VM image.")):
+        if os.path.isdir(p):
+            sz = du(p)
+            if sz >= 1 << 30:
+                add("path:" + p, title, sz, how, "reveal:" + p)
+    dups = (maint.get("storage") or {}).get("duplicates")
+    if dups:
+        add("dups", "Duplicate copies of your own files", sum(g["wasted"] for g in dups),
+            "Storage › Duplicate files: keep the oldest, move the others to the Trash.", "details:storage")
+    tr = du(TRASH) if os.path.isdir(TRASH) else 0
+    if tr:
+        add("trash", "Trash", tr, "Finder › Empty Trash (permanent).", "open:" + TRASH)
+    items.sort(key=lambda i: -i["size"])
+    total = sum(i["size"] for i in items)
+    return dict(goal=goal, free=d.free, gap=max(0, goal - d.free), candidates=total,
+                reachable=d.free + total >= goal, items=items, t=time.time())

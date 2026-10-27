@@ -9,6 +9,10 @@ done
 rm -rf ~/Applications/MemGuard.app ~/.local/bin/memguard "$D/state/.probe"
 defaults delete com.apple.dt.Xcode IDEBuildOperationMaxNumberOfConcurrentCompileTasks 2>/dev/null
 defaults delete com.brave.Browser HighEfficiencyModeEnabled 2>/dev/null
+defaults delete com.brave.Browser MemorySaverModeSavings 2>/dev/null
+defaults delete com.brave.Browser BackgroundModeEnabled 2>/dev/null
+defaults delete com.xdaw.app NSAppSleepDisabled 2>/dev/null          # App Nap back to the default for MyDAW
+launchctl unsetenv CMAKE_BUILD_PARALLEL_LEVEL; launchctl unsetenv MAKEFLAGS   # (memguard off does this too)
 DD=~/Library/Developer/Xcode/DerivedData
 tmutil removeexclusion "$DD" 2>/dev/null; rm -f "$DD/.metadata_never_index"
 for d in ~/Developer/XDAW/auto-src/build ~/Developer/XDAW/src/build ~/Developer/MYAPP/build ~/Developer/MYAPP/apps/macos/.build \
@@ -18,4 +22,5 @@ for d in ~/Developer/XDAW/auto-src/build ~/Developer/XDAW/src/build ~/Developer/
 done
 # agents memguard disabled stay disabled until you re-enable them:  launchctl enable gui/$(id -u)/<label>
 grep -h "MAINT disabled agent" "$D/logs/memguard.log"* 2>/dev/null | sed 's/.*agent /  disabled by memguard: /' 
+echo "Note: if you clicked Fix for the sleep file, undo it with: sudo pmset -a hibernatemode 3"
 echo "memguard uninstalled. (Folder $D left in place; trash it if you like.)"

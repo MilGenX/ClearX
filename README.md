@@ -111,6 +111,36 @@ Trash). Its root helper needs your password: `sudo ~/Developer/MacMemoryManager/
 | **i9-9900K thermal and power envelope.** The iMac's cooling can't hold all-core turbo, so it throttles under long loads. memguard never undervolts or disables Turbo. | CPU governor (background QoS, then duty-cycling), thermal watch, Xcode capped at 4 parallel compiles |
 | No GPU switching (iMac19,1 always uses the Radeon; `pmset gpuswitch` is irrelevant here) | Reduce Transparency/Motion lowers WindowServer GPU load at 5K (optional, your call) |
 
+### RAM reserve, App Freezer, interactive-aware builds (v3.1)
+
+- **RAM reserve** (`[reserve]`, default 10 GB). The controller's first goal is to keep 10 GB *ready to use*
+  (free + file cache macOS reuses instantly). Below it, one step per tick: (1) freeze idle hidden apps,
+  browsers' tab renderers only; (2) keep doing so even when the pool is green; (3) builds to 2 jobs at
+  background QoS; (4) also freeze hidden apps idle ≥ 1 min. It never touches the front app, audio, the DAW or
+  downloads. If what you're using plus the build leave less than 10 GB, it says so in the menu ("the reserve
+  comes back when the build finishes") and stops at step 2 instead of throttling the build for nothing.
+- **App Freezer** (`[freezer]`). A frozen app (SIGSTOP) stops using CPU and its memory gets compressed or
+  swapped once instead of churning. MemGuard.app (`app/Sources/Freezer.swift`) watches every app switch and
+  sends SIGCONT the moment macOS activates a frozen app (measured: 0.13 ms after the switch notification; the
+  app then has to page its memory back in, which can take 0.5–2 s the first time if it was swapped out). Never
+  frozen: the front app, anything holding a power assertion (audio playback, calls, downloads), anything that
+  moved > 1 MB on the network in the last 30 s, DAWs, compilers, VMs and the protected/`never` lists. The
+  daemon wakes everything when the pool is green and the reserve is met, when the freezer is off, or if
+  MemGuard.app isn't running. `memguard wake [all|<app>]`, or tap "Frozen: N apps" in the menu.
+- **Interactive-aware builds** (`[interactive]`). While you're using the Mac (keyboard/mouse in the last
+  60 s), compile jobs and the whole MyDAW auto-update tree (build and tests) run at background QoS and the next
+  build gets at most 4 jobs. After 2 min without input, they get full speed again.
+- **Build caps at the source.** With the Xcode cap, memguard also sets `CMAKE_BUILD_PARALLEL_LEVEL` and
+  `MAKEFLAGS=-jN` in the launchd environment (`launchctl setenv`), so `cmake --build` and `make` started from
+  launchd agents (like MyDAW's auto-update), Finder or new Terminal windows follow the same 8/4/2 cap.
+  `memguard off` and `uninstall.sh` unset them.
+- **Other user-level settings** (all removed by `uninstall.sh`): Brave `MemorySaverModeSavings = 2` (maximum)
+  and `BackgroundModeEnabled = false` (Brave doesn't keep running after its last window closes); check
+  `brave://policy` to confirm Brave lists them. `NSAppSleepDisabled = YES` for MyDAW (`com.xdaw.app`), so App
+  Nap never throttles it. Speed Up also shuts down booted iOS simulators when no build or test is running.
+- **Storage goal**: `memguard maintain plan 250` (and the Storage page) works out what it would take to have
+  250 GB free, item by item, with one button each. Nothing is deleted from there.
+
 ## Other controls (each tick)
 
 - **Swap gating.** macOS keeps swap allocated after pressure ends, so swap thresholds only count
@@ -247,7 +277,8 @@ tmutil removeexclusion ~/Library/Developer/Xcode/DerivedData
 
 ## Tests
 
-`test/selftest.log` (v1) and `test/selftest-v2.log` (v2) hold real runs. Each test used a config
+`test/selftest.log` (v1), `test/selftest-v2.log` (v2) and `test/selftest-v3.log` (v3.1: freezer + wake,
+reserve, interactive builds, storage plan; run `python3 test/selftest-v3.py`) hold real runs. Each test used a config
 whose `target_regex` limited memguard to the test processes only:
 - build guard: three fake 600 MB `clang` jobs (`test/hog.c`) under a 1 GB budget
 - predictive: an incompressible hog growing 500 MB/s (memguard went orange and paused it at 500 MB)

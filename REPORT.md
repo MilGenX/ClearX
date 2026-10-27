@@ -1,6 +1,6 @@
 # memguard v3: report for the iMac (2026-10-26)
 
-iMac19,1 · i9-9900K · 16 GB RAM (2 × 8 GB, 2 of 4 slots) · Radeon Pro 575X 4 GB · macOS 15.8.1 → 15.8.2 (installing)
+iMac19,1 · i9-9900K · 16 GB RAM (2 × 8 GB, 2 of 4 slots) · Radeon Pro 575X 4 GB · macOS 15.8.2
 
 ## A. Health score
 
@@ -12,7 +12,7 @@ iMac19,1 · i9-9900K · 16 GB RAM (2 × 8 GB, 2 of 4 slots) · Radeon Pro 575X 4
 | Storage (15, new) | — | 0 | 72.2 GB free (≥ 40 GB for swap), SMART Verified, SSD |
 | Updates (10) | −10 (macOS 15.8.2, Safari 27.2, brew cmake) | −9 → **0 after the restart** | cmake upgraded; macOS + Safari installing now |
 | Security (15) | −2 (CleanMyMac root helper, ad-hoc signed) | **0** | helper removed by `remove-cleanmymac-admin.sh`; its two dead login jobs booted out |
-| **Total** | **88** | **91 → 100 expected** | scoring unchanged except the stricter storage component |
+| **Total** | **88** | **100 after the update (measured 19:36, idle); 82 while the MyDAW auto-build runs (live 10-min average)** | scoring unchanged except the stricter storage component |
 
 Only you can fix: (1) finish the macOS 15.8.2 + Safari 27.2 install and restart (in progress);
 (2) System Settings → General → Login Items & Extensions: turn off the two **CleanMyMac X** entries
@@ -50,26 +50,73 @@ Only you can fix: (1) finish the macOS 15.8.2 + Safari 27.2 install and restart 
   Tracked per day in the Storage view. Lifetime writes need `brew install smartmontools` (your OK).
 - Pool is storage-aware: < 40 GB free or a slow disk (fsync ≥ 50 ms) → budgets and yellow kick in earlier.
 
-## C. Benchmark: memguard OFF vs ON (clean MyDAW Release build + Brave with tabs)
+## C. Benchmark: skipped at the user's request
 
-The OFF run started at 18:48 and was **stopped by me at 229 s** because the macOS update was about to restart
-the Mac (not by the safety guard). What it showed in those 229 s with no memguard (Xcode default = 16 compiles):
+The full memguard OFF vs ON build benchmark and the 20-app test were **cancelled by the user** (2026-10-26
+19:58). There is no ON result, so this report makes **no measured claim** that memguard makes builds faster.
+What exists is two partial OFF runs (clean MyDAW Release build, Xcode's default 16 compiles at once, no memguard):
 
-| | OFF (229 s, partial) | ON |
+| Partial OFF run | Length | CPU speed limit (min) | Load (max) | Swapped out | SSD written | Min available |
+|---|---|---|---|---|---|---|
+| 18:48 (stopped for the macOS update) | 229 s | **76 %** | 29.7 | 1024 MB | **3178 MB** | 5.5 GB |
+| 19:57 (stopped when the test was cancelled) | 76 s | **76 %** | 13.9 | — | — | 6.6 GB |
+
+Both runs hit thermal throttling within the first minute, and the first one wrote 3.2 GB to the SSD in under
+4 minutes. Those are the two things memguard's build caps target. `bench/mydaw-bench.sh` (OFF vs ON) and
+`bench/apps-test.py` (20 apps, with/without a build) are ready if you ever want the numbers.
+
+## Your two targets
+
+### A. "Never under 10 GB of RAM ready": built, but honest about the limit
+- The controller's first goal is now a **10 GB reserve** of ready-to-use memory (free + file cache macOS reuses
+  instantly), shown in the menu as "Reserve: 10 GB ✓/✗". Below it: freeze idle hidden apps (browsers: tab
+  renderers only), then builds to 2 jobs at background QoS, then also recently used hidden apps.
+- **Where it can't hold:** 16 GB minus ~2.5 GB system (wired) leaves ~13.5 GB for everything else. When the
+  app you're using plus a build need more than ~3.5 GB (an MyDAW build alone peaks at 3–6 GB of compilers), the
+  10 GB reserve can't be held without stopping the build. memguard then says so in the menu and doesn't
+  throttle the build to chase it. Measured during this evening's auto-update build: 3.6–4 GB ready.
+- **Cost:** frozen apps' memory gets compressed or written to swap once (some SSD writes), and switching back
+  to an app that was swapped out takes ~0.5–2 s the first time.
+- **With 48 GB (16 + 2×16):** the same workload leaves ~30 GB ready, so the reserve would hold without
+  freezing anything.
+
+### B. "At least 250 GB free": not reachable with safe items alone
+Free now **87 GB**; 250 GB needs **163 GB more**. Everything that can go without losing your own files:
+
+| Item | Size | How |
 |---|---|---|
-| CPU speed limit (min) | **76 %** (thermal throttling) | after the restart |
-| Load (max) | 29.7 | |
-| Swap growth / peak | +962 MB / 2.4 GB | |
-| Swapped out | 1024 MB | |
-| SSD written | **3178 MB in 229 s** | |
-| Min available memory | 5.5 GB | |
-| Peak compressed | 2.3 GB | |
-| Pressure peak | 1 (normal) | |
-| Peak VRAM / GPU spill | 1.9 GB / 48 MB | |
+| Google Drive "Tracks" folder kept offline on this Mac (same songs as ~/Music/X DAW Songs) | **103.5 GB** | Finder: right-click › Remove download. It stays in Drive |
+| iOS simulators + iPhone debug symbols (Xcode) | 17.1 GB | only if MyApp's iOS testing doesn't need them; re-downloadable |
+| Claude app data (mostly its sandbox VM image) | 11.3 GB | Claude settings |
+| Autodesk app data | 8.9 GB | if Autodesk apps are no longer used |
+| Codex runtimes cache | 1.6 GB | re-downloaded when used |
+| **Total** | **142.4 GB** | → about **230 GB free**, **~20 GB short of 250** |
 
-After the restart, run `~/Developer/MacMemoryManager/bench/mydaw-bench.sh` (or ask Claude to): it rebuilds the
-workspace from XDAW read-only, waits for a quiet Mac, runs OFF then ON with the same safety guard, and
-writes `bench/run-*-mydaw-{off,on}.json`. This table gets filled from those.
+The last ~20 GB would have to come from your own data: MyDAW's `XDAW/gold` work folder (12 GB) and `~/.cache/xdaw`
+(6.5 GB, the transcription models), or duplicates of your own files (Storage › Duplicates, after a scan).
+memguard deletes none of these. Each has a button on the Storage page.
+
+## Self-tests (fake processes only, isolated state): `test/selftest-v3.log`
+All 8 passed:
+- Interactive builds: the fake clang goes to background QoS while you're active (Xcode cap 2–4) and is released when you're away.
+- Reserve: escalates to stage 3 when below target, stops when unreachable, releases when met.
+- App Freezer: a hidden, idle TextEdit was frozen; on activation MemGuard.app woke it **0.13 ms** after the
+  switch notification (~0.4 s end to end including `open -a`). With MemGuard.app gone, the daemon woke it.
+- The storage plan computes.
+- Bug found and fixed by the test: `pmset` prints a Bluetooth device name with non-UTF-8 bytes, which would have
+  crashed every tick once the freezer was on.
+
+## Gap-audit levers
+| Item | Status |
+|---|---|
+| Build caps at the source | MyDAW's script hardcodes no `-j`. memguard now sets `CMAKE_BUILD_PARALLEL_LEVEL` + `MAKEFLAGS` via `launchctl setenv` with the 8/4/2 cap (no extra LaunchAgent: the daemon re-sets it). **Applied** |
+| MyDAW auto-update tree at background QoS | from its start while you're active; full speed after 2 min idle. **Applied** |
+| Brave `MemorySaverModeSavings=2`, `BackgroundModeEnabled=false` | **Applied** (user defaults); confirm in `brave://policy` after restarting Brave |
+| Speed Up: `simctl shutdown all` when no build/test runs; Clean up: `simctl delete unavailable` | **Applied** |
+| `NSAppSleepDisabled=YES` for MyDAW (`com.xdaw.app`) | **Applied** |
+| Non-default 5K scaling in "Needs you" | **Applied** (check only); yours is the default, so nothing shows |
+| Found and fixed: a password prompt ("sfltool wants to make changes") every 2 min from the login-items check | **Fixed**, no admin tools are called automatically |
+| Found and fixed: orange paused Claude.app's sandbox VM for 27 s | **Fixed**: VMs are now protected |
 
 ## Max potential: every item measured
 

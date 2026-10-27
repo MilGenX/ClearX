@@ -4,7 +4,7 @@ set -e
 cd "$(dirname "$0")"
 APP=build/MemGuard.app
 rm -rf "$APP"; mkdir -p "$APP/Contents/MacOS"
-xcrun swiftc -O -parse-as-library -target x86_64-apple-macos13.0 -o "$APP/Contents/MacOS/MemGuard" Sources/main.swift
+xcrun swiftc -O -parse-as-library -target x86_64-apple-macos13.0 -o "$APP/Contents/MacOS/MemGuard" Sources/*.swift
 cat > "$APP/Contents/Info.plist" <<PL
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

@@ -236,6 +236,7 @@ final class Model: ObservableObject {
             bg = Set(((j["bg"] as? [String: Any]) ?? [:]).keys.compactMap { Int32($0) })
             throttled = Set(((j["throttled"] as? [String: Any]) ?? [:]).keys.compactMap { Int32($0) })
             xcodeJobs = j["xcode_jobs"] as? Int ?? 0
+            reserve = j["reserve"] as? [String: Any]
             if let p = j["pool"] as? [String: Any] {
                 poolSeg = ((p["seg"] as? [String: Any]) ?? [:]).mapValues { num($0) }
                 poolTotal = max(num(p["total"]), 1)
@@ -250,6 +251,7 @@ final class Model: ObservableObject {
 
     var health = 0, healthWhy: [String] = [], needs: [[String: Any]] = [], diskTotal: UInt64 = 1, diskPurgeable: UInt64 = 0
     @Published var detailsTab = 0
+    var reserve: [String: Any]? = nil
     var ssdToday: UInt64 = 0
     private var lastNeeds = Date.distantPast
     func loadNeeds(force: Bool = false) {
@@ -532,6 +534,8 @@ struct Panel: View {
             Button(action: { m.speedUp() }) { Text(m.boosting ? "Speeding up…" : "Speed Up") }
                 .buttonStyle(AccentButton()).disabled(m.boosting || !m.enabled).opacity(m.boosting || !m.enabled ? 0.5 : 1)
             if let b = m.boost { BoostView(m: m, b: b) }
+            FrozenRow()
+            ReserveRow(m: m)
             SimpleBar(title: "Memory", frac: Double(m.poolTotal - (m.poolSeg["free"] ?? 0) - (m.poolSeg["cached"] ?? 0)) / Double(m.poolTotal),
                       word: memWord.0, color: memWord.1,
                       detail: "\(gb(m.availB)) of 16 GB ready for apps right now")
@@ -885,6 +889,8 @@ struct StoragePage: View {
             Text("• Written today: \(gb(num(days[today]))) (since the last restart \(gb(num(ssd["boot_w"]))). Most of this is memory overflow (swap); MemGuard keeps it down, and more RAM would end it.")
                 .fixedSize(horizontal: false, vertical: true)
             Divider()
+            StoragePlanView(mm: mm)
+            Divider()
             HStack {
                 Text("What's using space").font(.headline)
                 Spacer()
@@ -1003,6 +1009,7 @@ func dotImage(_ c: NSColor) -> NSImage {
 @main
 struct MemGuardApp: App {
     @StateObject var m = Model()
+    init() { _ = Freezer.shared }  // start waking frozen apps on activation from launch
     var body: some Scene {
         MenuBarExtra {
             Panel(m: m)

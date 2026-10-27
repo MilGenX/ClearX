@@ -1,11 +1,15 @@
-# memguard v3
+# ClearX (formerly memguard) v3.1
+
+ClearX is the new name: the app is `~/Applications/ClearX.app`, the command is `clearx` (`memguard` still works as an
+alias), and the LaunchAgents are `com.user.clearx` and `com.user.clearx.menubar`. File names in this folder
+(`memguard.py`, `memguard.conf`) are unchanged. ClearX is original code, not based on any other project.
 
 A per-user resource governor for this iMac (iMac19,1: Intel i9-9900K, 16 GB RAM, Radeon Pro 575X
 with 4 GB VRAM, 5K display, macOS 15). It has two parts:
 
 - **`memguard.py`**: a daemon run every 10 s by a LaunchAgent. It runs RAM + VRAM as **one 20 GB
   pool** and acts on it, together with swap, CPU load, thermals and the disk.
-- **MemGuard.app**: a native menu-bar app (SwiftUI, about 35 MB RSS, refreshes every 2 s). It
+- **ClearX.app**: a native menu-bar app (SwiftUI, about 35 MB RSS, refreshes every 2 s). It
   shows the live numbers and has buttons for every action.
 
 **Safety rules:** memguard never sends SIGKILL, never touches root or system processes, and
@@ -58,7 +62,7 @@ For a build that's already running, the build guard does the live work (pausing 
 
 ## Maintenance (replaces CleanMyMac)
 
-`memguard maintain …` on the command line, or the **Maintain** tab in MemGuard.app. It always
+`memguard maintain …` on the command line, or the **Maintain** tab in ClearX.app. It always
 previews with sizes first. Removing something moves it to `~/.Trash` (recoverable), and every
 move is logged in `logs/memguard.log` as `MAINT`. It never empties the Trash and never uses sudo.
 
@@ -120,13 +124,13 @@ Trash). Its root helper needs your password: `sudo ~/Developer/MacMemoryManager/
   downloads. If what you're using plus the build leave less than 10 GB, it says so in the menu ("the reserve
   comes back when the build finishes") and stops at step 2 instead of throttling the build for nothing.
 - **App Freezer** (`[freezer]`). A frozen app (SIGSTOP) stops using CPU and its memory gets compressed or
-  swapped once instead of churning. MemGuard.app (`app/Sources/Freezer.swift`) watches every app switch and
+  swapped once instead of churning. ClearX.app (`app/Sources/Freezer.swift`) watches every app switch and
   sends SIGCONT the moment macOS activates a frozen app (measured: 0.13 ms after the switch notification; the
   app then has to page its memory back in, which can take 0.5–2 s the first time if it was swapped out). Never
   frozen: the front app, anything holding a power assertion (audio playback, calls, downloads), anything that
   moved > 1 MB on the network in the last 30 s, DAWs, compilers, VMs and the protected/`never` lists. The
   daemon wakes everything when the pool is green and the reserve is met, when the freezer is off, or if
-  MemGuard.app isn't running. `memguard wake [all|<app>]`, or tap "Frozen: N apps" in the menu.
+  ClearX.app isn't running. `memguard wake [all|<app>]`, or tap "Frozen: N apps" in the menu.
 - **Interactive-aware builds** (`[interactive]`). While you're using the Mac (keyboard/mouse in the last
   60 s), compile jobs and the whole MyDAW auto-update tree (build and tests) run at background QoS and the next
   build gets at most 4 jobs. After 2 min without input, they get full speed again.
@@ -232,6 +236,9 @@ memguard bench run <label> [--guard-swap 3G] [--guard-avail 500M] -- <command>
                                    # if swap grows > guard or available memory < guard; CSV + JSON in bench/
 memguard optimize [--apply]        # the max-potential checklist (see Maintenance)
 memguard boost [--quit "App, App"] # Speed Up (see above)
+clearx run "<label>" [--slots N] <command…>   # heavy-job queue: big jobs (builds, exports, model runs) wait
+                                   # their turn, one (or N) at a time, only while memory isn't orange/red,
+                                   # and run at background QoS. Waiting jobs say so in the Terminal
 memguard junk                      # READ-ONLY report of reclaimable disk space + delete commands
 ```
 
@@ -257,8 +264,8 @@ signals being sent.
 ## Install / uninstall
 
 ```
-./install.sh                # daemon + CLI + MemGuard.app (launched now)
-./install.sh --login-item   # same, plus start MemGuard.app at login
+./install.sh                # daemon + CLI + ClearX.app (launched now)
+./install.sh --login-item   # same, plus start ClearX.app at login
 ./uninstall.sh              # resume everything, remove both LaunchAgents, the app, the CLI link,
                             # the Xcode/Brave keys and the Time Machine exclusion
 ```
@@ -269,7 +276,7 @@ memguard off
 launchctl bootout gui/$(id -u)/com.user.memguard
 launchctl bootout gui/$(id -u)/com.user.memguard.menubar
 rm ~/Library/LaunchAgents/com.user.memguard*.plist ~/.local/bin/memguard
-rm -rf ~/Applications/MemGuard.app
+rm -rf ~/Applications/ClearX.app
 defaults delete com.apple.dt.Xcode IDEBuildOperationMaxNumberOfConcurrentCompileTasks
 defaults delete com.brave.Browser HighEfficiencyModeEnabled
 tmutil removeexclusion ~/Library/Developer/Xcode/DerivedData

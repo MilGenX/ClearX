@@ -15,6 +15,7 @@ Usage:
   clearx off | on
   clearx maintain [all|scan|clean <cat,...>|large|startup|disable <label>|enable <label>
                      |uninstall <App> [--vendor com.x] [--apply]|updates|security|health|storage|optimize]
+  clearx run "<label>" [--slots N] <command...>   heavy-job queue: one (or N) at a time, low priority
   clearx wake [all|<app>]   unfreeze apps frozen by the App Freezer
   clearx boost [--json] [--quit "App, App"]   Speed Up: real actions only, measured before/after
   clearx optimize [--apply]   measure every limit of this Mac; --apply sets the safe user-level items
@@ -1088,6 +1089,38 @@ def bench_run(label, cmd, guard_swap=None, guard_avail=None, step=2, logfile=Non
     return r
 
 
+# ---------- heavy-job queue: big jobs line up instead of colliding ----------
+def run_queued(label, cmd, slots=1, timeout_h=6):
+    """clearx run "<label>" <command...>: waits until fewer than `slots` queued jobs are running and the pool is
+    green or yellow, then runs the command at background QoS (taskpolicy -b) and returns its exit code.
+    Queue state is a directory of lock files, so jobs from any Terminal or script share it."""
+    import fcntl
+    qdir = os.path.join(STATE_DIR, "queue")
+    os.makedirs(qdir, exist_ok=True)
+    t0, said = time.time(), False
+    while True:
+        for i in range(slots):
+            fd = os.open(os.path.join(qdir, f"slot{i}.lock"), os.O_RDWR | os.O_CREAT, 0o600)
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except OSError:
+                os.close(fd); continue
+            if load_state().get("level", "green") in ("green", "yellow"):
+                os.ftruncate(fd, 0); os.write(fd, f"{os.getpid()} {label}\n".encode())
+                log(f"QUEUE start {label} (waited {int(time.time() - t0)}s): {' '.join(cmd)[:120]}")
+                rc = subprocess.call(["taskpolicy", "-b"] + cmd)
+                log(f"QUEUE done {label} rc={rc} after {int(time.time() - t0)}s")
+                os.close(fd)  # releases the slot
+                return rc
+            os.close(fd)
+        if not said:
+            print(f"clearx: '{label}' is queued (another heavy job is running or memory is tight)...", file=sys.stderr)
+            said = True
+        if time.time() - t0 > timeout_h * 3600:
+            print("clearx: gave up waiting", file=sys.stderr); return 75
+        time.sleep(5)
+
+
 # ---------- SSD writes (swap churn is SSD wear) ----------
 def ssd_counters():
     """(bytes written, bytes read) on the internal disk since boot, from IOKit (IOBlockStorageDriver)."""
@@ -1488,6 +1521,12 @@ def main(argv):
         junk()
     elif cmd == "maintain":
         return maintain(argv[2:])
+    elif cmd == "run" and len(argv) > 3:  # clearx run "<label>" [--slots N] <command...>
+        a = argv[3:]
+        slots = 1
+        if a[0] == "--slots":
+            slots, a = int(a[1]), a[2:]
+        return run_queued(argv[2], a, slots)
     elif cmd == "wake":  # memguard wake [all|<app name>]: unfreeze
         st, name = load_state(), " ".join(argv[2:]) or "all"
         for k, i in list(st.get("paused", {}).items()):

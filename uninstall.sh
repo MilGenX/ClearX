@@ -1,12 +1,12 @@
 #!/bin/sh
-# Removes memguard completely and undoes every change it made. Resumes anything it paused first.
+# Removes ClearX (formerly memguard) completely and undoes every change it made. Resumes anything it paused first.
 D=~/Developer/MacMemoryManager
 /usr/bin/python3 "$D/memguard.py" off            # resumes paused, removes background QoS, stops CPU throttles
-osascript -e 'quit app "MemGuard"' 2>/dev/null; pkill -x MemGuard 2>/dev/null
-for L in com.user.memguard com.user.memguard.menubar; do
+for A in ClearX MemGuard; do osascript -e "quit app \"$A\"" 2>/dev/null; pkill -x $A 2>/dev/null; done
+for L in com.user.clearx com.user.clearx.menubar com.user.memguard com.user.memguard.menubar; do
   launchctl bootout gui/$(id -u)/$L 2>/dev/null; rm -f ~/Library/LaunchAgents/$L.plist
 done
-rm -rf ~/Applications/MemGuard.app ~/.local/bin/memguard "$D/state/.probe"
+rm -rf ~/Applications/ClearX.app ~/Applications/MemGuard.app ~/.local/bin/clearx ~/.local/bin/memguard "$D/state/.probe"
 defaults delete com.apple.dt.Xcode IDEBuildOperationMaxNumberOfConcurrentCompileTasks 2>/dev/null
 defaults delete com.brave.Browser HighEfficiencyModeEnabled 2>/dev/null
 defaults delete com.brave.Browser MemorySaverModeSavings 2>/dev/null
@@ -23,4 +23,4 @@ done
 # agents memguard disabled stay disabled until you re-enable them:  launchctl enable gui/$(id -u)/<label>
 grep -h "MAINT disabled agent" "$D/logs/memguard.log"* 2>/dev/null | sed 's/.*agent /  disabled by memguard: /' 
 echo "Note: if you clicked Fix for the sleep file, undo it with: sudo pmset -a hibernatemode 3"
-echo "memguard uninstalled. (Folder $D left in place; trash it if you like.)"
+echo "ClearX uninstalled. (Folder $D left in place; trash it if you like.)"

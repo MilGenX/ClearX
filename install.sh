@@ -1,21 +1,30 @@
 #!/bin/sh
-# Installs memguard (per-user, no root). Safe to re-run.
-#   ./install.sh               daemon LaunchAgent + CLI + MemGuard.app in ~/Applications
-#   ./install.sh --login-item  also start MemGuard.app at login (LaunchAgent com.user.memguard.menubar)
+# Installs ClearX (formerly memguard): per-user, no root. Safe to re-run; removes the old memguard names if present.
+#   ./install.sh               daemon LaunchAgent + CLI (clearx, alias memguard) + ClearX.app in ~/Applications
+#   ./install.sh --login-item  also start ClearX.app at login (LaunchAgent com.user.clearx.menubar)
 set -e
 D=~/Developer/MacMemoryManager
+U=$(id -u)
 mkdir -p "$D/logs" "$D/state" ~/.local/bin ~/Library/LaunchAgents ~/Applications
-chmod +x "$D/memguard" "$D/memguard.py"
-ln -sf "$D/memguard" ~/.local/bin/memguard
-cp "$D/com.user.memguard.plist" ~/Library/LaunchAgents/com.user.memguard.plist
-launchctl bootout gui/$(id -u)/com.user.memguard 2>/dev/null || true
-launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.user.memguard.plist
-[ -d "$D/app/build/MemGuard.app" ] || "$D/app/build.sh"
-rm -rf ~/Applications/MemGuard.app && cp -R "$D/app/build/MemGuard.app" ~/Applications/
+# old names (memguard v1-v3): stop and remove, so only one daemon and one menu app ever run
+for L in com.user.memguard com.user.memguard.menubar; do
+  launchctl bootout gui/$U/$L 2>/dev/null || true; rm -f ~/Library/LaunchAgents/$L.plist
+done
+osascript -e 'quit app "MemGuard"' 2>/dev/null || true; pkill -x MemGuard 2>/dev/null || true
+rm -rf ~/Applications/MemGuard.app
+chmod +x "$D/clearx" "$D/memguard" "$D/memguard.py"
+ln -sf "$D/clearx" ~/.local/bin/clearx
+ln -sf "$D/clearx" ~/.local/bin/memguard          # old name, kept as an alias
+cp "$D/com.user.clearx.plist" ~/Library/LaunchAgents/
+launchctl bootout gui/$U/com.user.clearx 2>/dev/null || true
+launchctl bootstrap gui/$U ~/Library/LaunchAgents/com.user.clearx.plist
+[ -d "$D/app/build/ClearX.app" ] || "$D/app/build.sh"
+osascript -e 'quit app "ClearX"' 2>/dev/null || true; pkill -x ClearX 2>/dev/null || true
+rm -rf ~/Applications/ClearX.app && cp -R "$D/app/build/ClearX.app" ~/Applications/
 if [ "$1" = "--login-item" ]; then
-  cp "$D/com.user.memguard.menubar.plist" ~/Library/LaunchAgents/
-  launchctl bootout gui/$(id -u)/com.user.memguard.menubar 2>/dev/null || true
-  launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.user.memguard.menubar.plist
+  cp "$D/com.user.clearx.menubar.plist" ~/Library/LaunchAgents/
+  launchctl bootout gui/$U/com.user.clearx.menubar 2>/dev/null || true
+  launchctl bootstrap gui/$U ~/Library/LaunchAgents/com.user.clearx.menubar.plist
 fi
-open ~/Applications/MemGuard.app
-launchctl list | grep memguard
+open ~/Applications/ClearX.app
+launchctl list | grep -E "clearx|memguard"

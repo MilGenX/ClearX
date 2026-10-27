@@ -2,9 +2,9 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <key>Label</key><string>com.user.memguard.menubar</string>
+  <key>Label</key><string>com.user.clearx.menubar</string>
   <key>ProgramArguments</key>
-  <array><string>/usr/bin/open</string><string>-a</string><string>~/Applications/MemGuard.app</string></array>
+  <array><string>/usr/bin/open</string><string>-a</string><string>~/Applications/ClearX.app</string></array>
   <key>RunAtLoad</key><true/>
 </dict>
 </plist>

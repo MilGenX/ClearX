@@ -6,7 +6,7 @@ import IOKit
 import Darwin
 
 let MG_DIR = NSString(string: "~/Developer/MacMemoryManager").expandingTildeInPath
-let MG_CLI = MG_DIR + "/memguard"
+let MG_CLI = MG_DIR + "/clearx"
 let STATE = MG_DIR + "/state/state.json"
 let OFF = MG_DIR + "/state/disabled"
 
@@ -490,7 +490,7 @@ struct Panel: View {
                          default: return ("All good", Theme.accent) }
     }
     var headline: String {
-        if !m.enabled { return "MemGuard is off" }
+        if !m.enabled { return "ClearX is off" }
         switch m.level {
         case "red": return "Very short on memory"
         case "orange": return "Short on memory"
@@ -503,7 +503,7 @@ struct Panel: View {
         switch m.level {
         case "red": return "Background apps are paused so what you're using keeps going."
         case "orange": return "Background apps are paused for a moment."
-        case "yellow": return "MemGuard is quietly slowing background apps."
+        case "yellow": return "ClearX is quietly slowing background apps."
         default: return m.speedLimit < 100 ? "Builds are slowed a little to cool it down." : "Nothing needs doing right now."
         }
     }
@@ -785,7 +785,7 @@ struct MaintView: View {
                     Text(label).lineLimit(1)
                     Spacer()
                     Text(mb(num(s["rss"]))).monospacedDigit()
-                    if scope == "user" && !label.hasPrefix("com.user.memguard") {
+                    if scope == "user" && !label.hasPrefix("com.user.memguard") && !label.hasPrefix("com.user.clearx") {
                         Button(on ? "Disable" : "Enable") { mm.run("…", [on ? "disable" : "enable", label]) }
                     } else { Text(scope == "login item" ? "Login Items" : "admin").foregroundColor(.secondary) }
                 }.font(.caption2).buttonStyle(.borderless)
@@ -886,7 +886,7 @@ struct StoragePage: View {
             Text("• Health check (SMART): \(d["smart"] as? String ?? "?")\((d["smart"] as? String) == "Verified" ? ": no signs of failure." : "")")
             Text("• TRIM: \(d["trim"] as? String ?? "?")\((d["trim"] as? String) == "Yes" ? ": keeps the drive fast as it fills." : "")")
             if !sp.isEmpty { Text("• Measured speed: writes \(num(sp["write_mb_s"])) MB/s. Fast enough; an external drive wouldn't help.") }
-            Text("• Written today: \(gb(num(days[today]))) (since the last restart \(gb(num(ssd["boot_w"]))). Most of this is memory overflow (swap); MemGuard keeps it down, and more RAM would end it.")
+            Text("• Written today: \(gb(num(days[today]))) (since the last restart \(gb(num(ssd["boot_w"]))). Most of this is memory overflow (swap); ClearX keeps it down, and more RAM would end it.")
                 .fixedSize(horizontal: false, vertical: true)
             Divider()
             StoragePlanView(mm: mm)
@@ -1020,6 +1020,6 @@ struct MemGuardApp: App {
             }
         }
         .menuBarExtraStyle(.window)
-        Window("MemGuard Details", id: "details") { DetailsView(m: m) }
+        Window("ClearX Details", id: "details") { DetailsView(m: m) }
     }
 }

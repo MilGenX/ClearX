@@ -1,23 +1,23 @@
 #!/usr/bin/env python3
-"""memguard v2 - keeps a 16 GB Intel Mac out of swap death.
+"""ClearX (formerly memguard) - keeps a 16 GB Intel Mac fast and out of swap death.
 
 Lowers priority (renice + taskpolicy background QoS), pauses (SIGSTOP) memory hogs,
 caps parallel compiler memory, predicts exhaustion from the trend, and resumes
 (SIGCONT) when pressure drops. Never sends SIGKILL. Stdlib only.
 
 Usage:
-  memguard status | log [N] | junk | json      (status shows the 20 GB RAM+VRAM pool)
-  memguard tick [--dry-run] [--force-level L]
-  memguard pause <name> | resume all | resume <name>
-  memguard pause-pid|resume-pid|bg-pid|fg-pid|quit-pid|throttle-pid|unthrottle-pid <pid>
-  memguard bench [seconds]   (CSV snapshot: speed limit, load, swap rate, VRAM, GPU%)
-  memguard bench run <label> [--guard-swap 3G] [--guard-avail 500M] -- <command>   (workload benchmark)
-  memguard off | on
-  memguard maintain [all|scan|clean <cat,...>|large|startup|disable <label>|enable <label>
+  clearx status | log [N] | junk | json      (status shows the 20 GB RAM+VRAM pool)
+  clearx tick [--dry-run] [--force-level L]
+  clearx pause <name> | resume all | resume <name>
+  clearx pause-pid|resume-pid|bg-pid|fg-pid|quit-pid|throttle-pid|unthrottle-pid <pid>
+  clearx bench [seconds]   (CSV snapshot: speed limit, load, swap rate, VRAM, GPU%)
+  clearx bench run <label> [--guard-swap 3G] [--guard-avail 500M] -- <command>   (workload benchmark)
+  clearx off | on
+  clearx maintain [all|scan|clean <cat,...>|large|startup|disable <label>|enable <label>
                      |uninstall <App> [--vendor com.x] [--apply]|updates|security|health|storage|optimize]
-  memguard wake [all|<app>]   unfreeze apps frozen by the App Freezer
-  memguard boost [--json] [--quit "App, App"]   Speed Up: real actions only, measured before/after
-  memguard optimize [--apply]   measure every limit of this Mac; --apply sets the safe user-level items
+  clearx wake [all|<app>]   unfreeze apps frozen by the App Freezer
+  clearx boost [--json] [--quit "App, App"]   Speed Up: real actions only, measured before/after
+  clearx optimize [--apply]   measure every limit of this Mac; --apply sets the safe user-level items
 """
 import configparser, fnmatch, json, os, re, signal, subprocess, sys, time
 
@@ -132,7 +132,7 @@ def notify(title, msg):
         return
     esc = lambda s: s.replace("\\", "\\\\").replace('"', '\\"')
     subprocess.run(["osascript", "-e",
-                    f'display notification "{esc(msg)}" with title "memguard" subtitle "{esc(title)}"'],
+                    f'display notification "{esc(msg)}" with title "ClearX" subtitle "{esc(title)}"'],
                    capture_output=True, timeout=10)
 
 
@@ -589,10 +589,10 @@ def freeze_tick(conf, st, procs, lvl, fpid, daws, compilers, now, dry, reserve_s
     except (OSError, ValueError):
         pass
     on = str(F.get("enabled", "false")).lower() == "true" or reserve_stage > 0
-    app_alive = any(p["name"] == "MemGuard" for p in procs.values())
+    app_alive = any(p["name"] in ("ClearX", "MemGuard") for p in procs.values())
     healthy = lvl == 0 and reserve_stage < 2
     if frozen and (not on or healthy or not app_alive):
-        why = "freezer off" if not on else "pool healthy and reserve met" if healthy else "MemGuard.app not running"
+        why = "freezer off" if not on else "pool healthy and reserve met" if healthy else "ClearX.app not running"
         for k in list(frozen):
             resume(int(k), st, why, dry=dry)
         log(f"UNFREEZE all ({why})")
@@ -1134,7 +1134,7 @@ def track_agents(st):
 
 SAFE_QUIT_DEFAULT = "Music, TV, Podcasts, News, Stocks, Weather, Maps, App Store, System Settings, Photos, Preview, " \
                     "Calculator, Dictionary, Font Book, Books, Home, Freeform"
-NEVER_QUIT = "Finder, Xcode*, Claude*, Terminal, iTerm2, MemGuard, Dock, loginwindow, SystemUIServer"
+NEVER_QUIT = "Finder, Xcode*, Claude*, Terminal, iTerm2, ClearX, MemGuard, Dock, loginwindow, SystemUIServer"
 
 
 def gui_apps():
@@ -1203,7 +1203,7 @@ def boost(quit_names=None, as_json=False):
         for label, info in st.get("agent_rss", {}).items():
             pr = procs.get(info["pid"])
             pl = os.path.expanduser(f"~/Library/LaunchAgents/{label}.plist")
-            if not pr or label.startswith(("com.user.memguard", "com.mydaw.")) or not os.path.exists(pl):
+            if not pr or label.startswith(("com.user.memguard", "com.user.clearx", "com.mydaw.")) or not os.path.exists(pl):
                 continue
             try:
                 with open(pl, "rb") as f:
@@ -1242,7 +1242,7 @@ def boost(quit_names=None, as_json=False):
     safe = globs(conf.get("boost", "safe_quit", fallback=SAFE_QUIT_DEFAULT))
     idle = []
     for a in gui_apps():
-        if a["pid"] == fpid or a["name"] in ("MemGuard",):
+        if a["pid"] == fpid or a["name"] in ("ClearX", "MemGuard"):
             continue
         mem = sum(procs[p]["mem"] for p in tree(procs, [a["pid"]]) if p in procs)
         idle_s = now - seen.get(a["name"], since)
@@ -1414,7 +1414,7 @@ def status():
     st, m = load_state(), metrics()
     pool = st.get("pool")
     pri = {"studio": "DAW first", "build": "build running"}.get(st.get("mode"), "")
-    print(f"memguard: {'OFF' if os.path.exists(OFF_FILE) else 'ON (Max)'}  pool={st.get('level', '?')}  "
+    print(f"ClearX: {'OFF' if os.path.exists(OFF_FILE) else 'ON (Max)'}  pool={st.get('level', '?')}  "
           f"foreground={st.get('foreground') or '?'}{'  priority: ' + pri if pri else ''}")
     if pool:
         G = lambda b: f"{b / (1 << 30):.1f}"
@@ -1517,7 +1517,7 @@ def main(argv):
         st = load_state()
         st.pop("mode_override", None)
         save_state(st)
-        print("memguard has one mode, Max: it adapts by itself (a DAW or a build running only changes priorities)")
+        print("ClearX has one mode, Max: it adapts by itself (a DAW or a build running only changes priorities)")
     elif cmd == "pause" and len(argv) > 2:
         st, name = load_state(), " ".join(argv[2:])
         hits = [p for p in proc_list().values() if matches(p["name"], [name])
@@ -1557,13 +1557,13 @@ def main(argv):
             subprocess.run(["launchctl", "unsetenv", v], capture_output=True)
         st.pop("xcode_jobs", None)
         save_state(st)
-        log("memguard OFF")
-        print("memguard off (all paused processes resumed, background QoS removed)")
+        log("ClearX OFF")
+        print("ClearX off (all paused processes resumed, background QoS removed)")
     elif cmd == "on":
         if os.path.exists(OFF_FILE):
             os.remove(OFF_FILE)
-        log("memguard ON")
-        print("memguard on")
+        log("ClearX ON")
+        print("ClearX on")
     elif cmd == "log":
         n = argv[2] if len(argv) > 2 else "40"
         os.execvp("tail", ["tail", "-n", n, LOG_FILE])

@@ -877,6 +877,27 @@ final class MaintModel: ObservableObject {
             DispatchQueue.main.async { self.busy = nil; self.output = out; self.load() }
         }
     }
+    /// Fixes that delete things: a confirm first, then what was freed.
+    func confirmFix(_ what: String, title: String, detail: String) {
+        NSApp.activate(ignoringOtherApps: true)
+        let a = NSAlert(); a.messageText = title; a.informativeText = detail
+        a.addButton(withTitle: "Remove"); a.addButton(withTitle: "Cancel")
+        guard a.runModal() == .alertFirstButtonReturn else { return }
+        busy = "Removing…"
+        DispatchQueue.global().async {
+            let out = mg(["maintain", "fix", what])
+            DispatchQueue.main.async {
+                self.busy = nil; self.load()
+                let r = NSAlert(); r.messageText = "Done"
+                r.informativeText = out.split(separator: "\n").last.map(String.init) ?? out
+                r.runModal()
+            }
+        }
+    }
+    func confirmIOSDev() {
+        confirmFix("iosdev", title: "Remove iOS simulators and iPhone debug symbols?",
+                   detail: "Shuts down and deletes every iOS simulator, deletes the simulator runtimes, and moves the iPhone debug symbols to the Trash. Xcode downloads them again if MyApp's iOS work needs them (slowly).")
+    }
     var junk: [[String: Any]] { j["junk"] as? [[String: Any]] ?? [] }
     var startup: [[String: Any]] { j["startup"] as? [[String: Any]] ?? [] }
     var security: [String: Any] { j["security"] as? [String: Any] ?? [:] }
@@ -932,6 +953,7 @@ struct CleanupView: View {
                         Text(c["title"] as? String ?? "").lineLimit(1).foregroundColor(Theme.text)
                         Spacer()
                         Text(mb(num(c["size"]))).monospacedDigit().foregroundColor(Theme.sub)
+                        if action == "fix:iosdev" { Button("Remove…") { mm.confirmIOSDev() }.disabled(mm.busy != nil) }
                     }.font(.system(size: 12))
                 }
                 Text("Moves to the Trash, so you can get it back. Empty the Trash yourself to free the space.")

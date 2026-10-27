@@ -1535,7 +1535,13 @@ def maintain(args):
         print(json.dumps(maint.needs(d, load_state())))
     if sub == "fix" and len(args) > 1:
         ok = maint.fix(args[1], log)
-        print("done" if ok else "not done")
+        if args[1] == "iosdev":
+            print(f"Freed {ok[0] / 1e9:.1f} GB now; {ok[1] / 1e9:.1f} GB of iPhone debug symbols went to the Trash "
+                  "(empty it to free that too).")
+            d["junk"] = maint.scan_junk(); d["junk_t"] = time.time()
+            d["plan"] = maint.storage_plan(d, round(d.get("plan", {}).get("goal", 250 * 10 ** 9) / 10 ** 9))
+        else:
+            print("done" if ok else "not done")
         if args[1] == "caches":
             d["junk"] = maint.scan_junk(); d["junk_t"] = time.time()
     if sub == "optimize":

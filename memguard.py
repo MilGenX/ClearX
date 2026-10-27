@@ -805,7 +805,8 @@ def tick(dry=False, force=None):
         st["hid_idle"] = round(idle)
         if idle < float(I.get("active_s", 60)):  # you're using the Mac: builds yield to you
             want = min(want, int(I.get("active_jobs", 4)))
-            auto = [p["pid"] for p in procs.values() if "mydaw-auto-update" in p["path"] or
+            bp = globs(I.get("build_paths", "/auto-src/, /.worktrees/builder/"))
+            auto = [p["pid"] for p in procs.values() if "mydaw-auto-update" in p["path"] or any(x in p["path"] for x in bp) or
                     (p["name"] in ("zsh", "bash", "sh") and "mydaw-auto-update" in cmdline(p["pid"]))] \
                 if any(p["name"] in ("zsh", "bash", "sh") for p in procs.values()) else []
             updater = tree(procs, auto)  # MyDAW's auto-update build and tests, from the moment they start

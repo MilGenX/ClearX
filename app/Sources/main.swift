@@ -314,10 +314,10 @@ struct Sparkline: View {
                     let y = g.size.height * (1 - CGFloat(v / mx))
                     i == 0 ? p.move(to: CGPoint(x: x, y: y)) : p.addLine(to: CGPoint(x: x, y: y))
                 }
-            }.stroke(Color.orange, lineWidth: 1)
+            }.stroke(Theme.warn, lineWidth: 1.5)
         }
         .frame(height: 28)
-        .background(Color.secondary.opacity(0.08))
+        .background(RoundedRectangle(cornerRadius: 6).fill(Theme.line.opacity(0.5)))
     }
 }
 
@@ -326,8 +326,8 @@ struct Bar: View {
     var body: some View {
         GeometryReader { g in
             ZStack(alignment: .leading) {
-                Rectangle().fill(Color.secondary.opacity(0.15))
-                Rectangle().fill(frac > 0.9 ? Color.red : frac > 0.7 ? Color.orange : Color.accentColor)
+                Rectangle().fill(Theme.line)
+                Rectangle().fill(frac > 0.9 ? Theme.bad : frac > 0.7 ? Theme.warn : Theme.accent)
                     .frame(width: g.size.width * CGFloat(min(max(frac, 0), 1)))
             }
         }.frame(height: 6).cornerRadius(2)
@@ -335,9 +335,9 @@ struct Bar: View {
 }
 
 // One bar for RAM + VRAM: app | wired | compressed | GPU spill | VRAM | cached | free, swap drawn past the end
-let POOL_SEGS: [(String, String, Color)] = [("app", "App", .blue), ("wired", "System", .orange), ("compressed", "Compressed", .yellow),
-                                            ("spill", "Graphics overflow", .red), ("vram", "VRAM", .purple), ("cached", "Reusable cache", Color.green.opacity(0.45)),
-                                            ("free", "Unused", Color.green.opacity(0.8))]
+let POOL_SEGS: [(String, String, Color)] = [("app", "Apps", Theme.info), ("wired", "System", Color(red: 0.70, green: 0.55, blue: 1.0)), ("compressed", "Compressed", Theme.warn),
+                                            ("spill", "Graphics overflow", Theme.bad), ("vram", "Graphics", Color(red: 0.36, green: 0.83, blue: 0.95)), ("cached", "Reusable cache", Theme.accent.opacity(0.45)),
+                                            ("free", "Unused", Theme.accent)]
 
 struct PoolBar: View {
     let seg: [String: UInt64], total: UInt64, swap: UInt64
@@ -349,11 +349,11 @@ struct PoolBar: View {
                 ForEach(POOL_SEGS, id: \.0) { k, _, c in
                     Rectangle().fill(c).frame(width: w * CGFloat(Double(seg[k] ?? 0) / Double(total)))
                 }
-                Rectangle().fill(Color.red.opacity(0.55)).frame(width: w * CGFloat(over))   // swap overflow
-                    .overlay(Rectangle().stroke(Color.red, style: StrokeStyle(lineWidth: 1, dash: [2])))
+                Rectangle().fill(Theme.bad.opacity(0.55)).frame(width: w * CGFloat(over))   // swap overflow
+                    .overlay(Rectangle().stroke(Theme.bad, style: StrokeStyle(lineWidth: 1, dash: [2])))
                 Spacer(minLength: 0)
             }
-        }.frame(height: 14).cornerRadius(3)
+        }.frame(height: 14).background(Theme.line).clipShape(RoundedRectangle(cornerRadius: 4))
     }
 }
 
@@ -420,10 +420,17 @@ struct AccentButton: ButtonStyle {
 }
 
 struct GhostButton: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label.font(.system(size: 12, weight: .semibold)).foregroundColor(Theme.text)
+    func makeBody(configuration: Configuration) -> some View { GhostLabel(c: configuration) }
+}
+
+struct GhostLabel: View {
+    let c: ButtonStyleConfiguration
+    @Environment(\.isEnabled) var enabled
+    var body: some View {
+        c.label.font(.system(size: 12, weight: .semibold)).foregroundColor(Theme.text)
             .padding(.horizontal, 10).padding(.vertical, 5)
-            .background(Capsule().fill(Theme.line.opacity(configuration.isPressed ? 1 : 0.7)))
+            .background(Capsule().fill(Theme.line.opacity(c.isPressed ? 1 : 0.7)))
+            .opacity(enabled ? 1 : 0.4)
     }
 }
 
@@ -581,118 +588,242 @@ struct Panel: View {
 }
 
 // Everything else lives here: live numbers, processes, cleanup, storage, optimize, security.
+// Details window: sidebar + one page at a time, every section in a card.
+let DETAIL_TABS: [(Int, String, String)] = [(1, "Right now", "waveform.path.ecg"), (0, "Storage", "internaldrive"),
+                                            (2, "Clean up", "sparkles"), (3, "Checks", "checkmark.shield")]
+
+struct Card<Trailing: View, Content: View>: View {
+    let title: String
+    let trailing: Trailing
+    let content: Content
+    init(_ title: String, @ViewBuilder trailing: () -> Trailing, @ViewBuilder content: () -> Content) {
+        self.title = title; self.trailing = trailing(); self.content = content()
+    }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if !title.isEmpty {
+                HStack(spacing: 8) {
+                    Text(title.uppercased()).font(.system(size: 10, weight: .semibold)).kerning(0.8).foregroundColor(Theme.sub)
+                    Spacer()
+                    trailing
+                }
+            }
+            content
+        }
+        .padding(16).frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 12).fill(Theme.card))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.line))
+    }
+}
+
+extension Card where Trailing == EmptyView {
+    init(_ title: String, @ViewBuilder content: () -> Content) { self.init(title, trailing: { EmptyView() }, content: content) }
+}
+
+struct PageHeader: View {
+    let title: String, sub: String
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title).font(.system(size: 22, weight: .bold)).foregroundColor(Theme.text)
+            Text(sub).font(.system(size: 13)).foregroundColor(Theme.sub).fixedSize(horizontal: false, vertical: true)
+        }
+    }
+}
+
+// One line in a list: name, a number, then its buttons.
+struct ProcRow<Actions: View>: View {
+    let name: String, value: String
+    let actions: Actions
+    init(name: String, value: String, @ViewBuilder actions: () -> Actions) {
+        self.name = name; self.value = value; self.actions = actions()
+    }
+    var body: some View {
+        HStack(spacing: 8) {
+            Text(name).lineLimit(1).truncationMode(.middle).foregroundColor(Theme.text)
+            Spacer()
+            Text(value).monospacedDigit().foregroundColor(Theme.sub)
+            actions
+        }.font(.system(size: 12)).padding(.vertical, 2)
+    }
+}
+
+struct CheckLine: View {
+    let ok: Bool, text: String
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: ok ? "checkmark.circle.fill" : "exclamationmark.circle.fill").foregroundColor(ok ? Theme.accent : Theme.warn)
+            Text(text).foregroundColor(Theme.text).fixedSize(horizontal: false, vertical: true)
+        }.font(.system(size: 12))
+    }
+}
+
+func legendDot(_ c: Color, _ t: String) -> some View {
+    HStack(spacing: 5) { Circle().fill(c).frame(width: 7, height: 7); Text(t) }
+}
+
+struct BusyBadge: View {
+    @ObservedObject var mm: MaintModel
+    var body: some View {
+        if let b = mm.busy {
+            HStack(spacing: 6) { ProgressView().controlSize(.small); Text(b).font(.system(size: 11)).foregroundColor(Theme.sub) }
+        }
+    }
+}
+
+struct OutputCard: View {
+    @ObservedObject var mm: MaintModel
+    var body: some View {
+        if !mm.output.isEmpty {
+            Card("Last result") {
+                ScrollView {
+                    Text(mm.output).font(.system(size: 10, design: .monospaced)).foregroundColor(Theme.sub).textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }.frame(height: 110)
+            }
+        }
+    }
+}
+
 struct DetailsView: View {
     @ObservedObject var m: Model
     @StateObject var mm = MaintModel()
     var body: some View {
-        TabView(selection: $m.detailsTab) {
-            ScrollView { StoragePage(m: m, mm: mm).padding(12) }.tabItem { Text("Storage") }.tag(0)
-            ScrollView { monitor.padding(12) }.tabItem { Text("Live") }.tag(1)
-            ScrollView { MaintView(mm: mm).padding(12) }.tabItem { Text("Clean up & checks") }.tag(2)
-        }.frame(minWidth: 480, minHeight: 640)
-        .background(Theme.bg).preferredColorScheme(.dark).tint(Theme.accent)
+        HStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 8) {
+                    Circle().fill(Color(m.color)).frame(width: 8, height: 8)
+                    Text("ClearX").font(.system(size: 15, weight: .bold)).foregroundColor(Theme.text)
+                }.padding(.horizontal, 10).padding(.bottom, 14)
+                ForEach(DETAIL_TABS, id: \.0) { t, label, icon in
+                    let on = m.detailsTab == t
+                    Button(action: { m.detailsTab = t }) {
+                        HStack(spacing: 8) { Image(systemName: icon).frame(width: 16); Text(label); Spacer() }
+                            .font(.system(size: 13, weight: on ? .semibold : .regular))
+                            .foregroundColor(on ? Theme.text : Theme.sub)
+                            .padding(.horizontal, 10).padding(.vertical, 8)
+                            .background(RoundedRectangle(cornerRadius: 8).fill(on ? Theme.line : Color.clear))
+                            .contentShape(Rectangle())
+                    }.buttonStyle(.plain)
+                }
+                Spacer()
+                Button("Open settings file") { NSWorkspace.shared.open(URL(fileURLWithPath: MG_DIR + "/memguard.conf")) }
+                    .buttonStyle(.plain).font(.system(size: 11)).foregroundColor(Theme.sub).padding(.horizontal, 10)
+            }
+            .padding(.vertical, 20).padding(.horizontal, 12)
+            .frame(width: 190).frame(maxHeight: .infinity, alignment: .top)
+            .background(Theme.card)
+            .overlay(Rectangle().fill(Theme.line).frame(width: 1), alignment: .trailing)
+            ScrollView {
+                page.padding(24).frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .frame(minWidth: 760, minHeight: 640)
+        .background(Theme.bg).foregroundColor(Theme.text).font(.system(size: 12))
+        .buttonStyle(GhostButton()).tint(Theme.accent).preferredColorScheme(.dark)
+    }
+
+    @ViewBuilder var page: some View {
+        switch m.detailsTab {
+        case 0: StoragePage(m: m, mm: mm)
+        case 2: CleanupView(mm: mm)
+        case 3: ChecksView(mm: mm)
+        default: monitor
+        }
+    }
+
+    var levelSentence: String {
+        if !m.enabled { return "ClearX is off. Your Mac is on its own." }
+        switch m.level {
+        case "red": return "Very short on memory. Background apps are paused so what you're using keeps going."
+        case "orange": return "Short on memory. Background apps are paused for a moment."
+        case "yellow": return "Busy. ClearX is quietly slowing background apps."
+        default: return "Everything is running smoothly."
+        }
     }
 
     var monitor: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Circle().fill(Color(m.color)).frame(width: 10, height: 10)
-                Text("Memory state: \(m.level)").bold()
-            }
-            Group {
-                HStack {
-                    Text("Memory pool · 16 GB RAM + 4 GB VRAM").font(.caption).foregroundColor(.secondary)
-                    Spacer()
-                    Text("how hard it's working to find memory: \(m.pressurePct)%").font(.caption)
+        let ready = (m.poolSeg["free"] ?? 0) + (m.poolSeg["cached"] ?? 0)
+        return VStack(alignment: .leading, spacing: 16) {
+            PageHeader(title: "Right now", sub: levelSentence)
+            Card("Memory") {
+                Text("working \(m.pressurePct)% hard to find memory").font(.system(size: 11)).foregroundColor(Theme.sub)
+            } content: {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text(gb(ready)).font(.system(size: 26, weight: .bold, design: .rounded)).foregroundColor(Theme.text)
+                    Text("ready to use").foregroundColor(Theme.sub)
                 }
-                Text("Ready to use: \(gb((m.poolSeg["free"] ?? 0) + (m.poolSeg["cached"] ?? 0))) (\(gb(m.poolSeg["free"] ?? 0)) unused + \(gb(m.poolSeg["cached"] ?? 0)) cache macOS reuses instantly)")
-                    .font(.callout).bold()
+                Text("\(gb(m.poolSeg["free"] ?? 0)) unused + \(gb(m.poolSeg["cached"] ?? 0)) cache macOS reuses instantly, out of 16 GB memory + 4 GB graphics memory")
+                    .font(.system(size: 11)).foregroundColor(Theme.sub).fixedSize(horizontal: false, vertical: true)
                 PoolBar(seg: m.poolSeg, total: m.poolTotal, swap: m.swapUsed)
-                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 2), count: 4), alignment: .leading, spacing: 1) {
-                    ForEach(POOL_SEGS, id: \.0) { k, label, c in
-                        HStack(spacing: 3) { Rectangle().fill(c).frame(width: 7, height: 7); Text("\(label) \(gb(m.poolSeg[k] ?? 0))") }
-                    }
-                    HStack(spacing: 3) { Rectangle().fill(Color.red.opacity(0.55)).frame(width: 7, height: 7); Text("Swap \(gb(m.swapUsed))") }
-                }.font(.system(size: 9))
-                if !m.poolWhy.isEmpty { Text(m.poolWhy.joined(separator: " · ")).font(.caption2).foregroundColor(.orange) }
-                HStack {
-                    Text("Swap \(mb(m.swapUsed)) · out \(String(format: "%.1f", m.swapRate)) MB/s")
-                    if let t = m.tte { Text("· full in ~\(Int(t))s").foregroundColor(.red) }
-                }.font(.caption)
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 4), alignment: .leading, spacing: 6) {
+                    ForEach(POOL_SEGS, id: \.0) { k, label, c in legendDot(c, "\(label) \(gb(m.poolSeg[k] ?? 0))") }
+                    legendDot(Theme.bad.opacity(0.6), "Swap \(gb(m.swapUsed))")
+                }.font(.system(size: 10)).foregroundColor(Theme.sub)
+                if !m.poolWhy.isEmpty { Text(m.poolWhy.joined(separator: " · ")).font(.system(size: 11)).foregroundColor(Theme.warn) }
+                HStack(spacing: 4) {
+                    Text("Overflow to disk (swap) \(mb(m.swapUsed)) · writing \(String(format: "%.1f", m.swapRate)) MB/s").foregroundColor(Theme.sub)
+                    if let t = m.tte { Text("· full in about \(Int(t))s").foregroundColor(Theme.bad) }
+                }.font(.system(size: 11))
                 Sparkline(values: m.swapHist)
             }
-            Divider()
-            Group {
-                Text("GPU · Radeon Pro 575X").font(.caption).foregroundColor(.secondary)
-                HStack { Text("VRAM \(mb(m.vramUsed)) / 4.0 GB"); Spacer(); Text("GPU \(m.gpuUtil)%") }
-                Text(String(format: "Spill into RAM %@ · %+.1f MB/s%@", mb(m.poolSeg["spill"] ?? 0), m.spillRate,
-                            m.spilling ? " · SPILLING" : "")).font(.caption).foregroundColor(m.spilling ? .red : .primary)
-                Text("Disk \(gb(m.diskFree)) free · fsync \(String(format: "%.1f", m.diskLat)) ms\(m.tight ? " · tight: budgets apply early" : "") · next Xcode build \(m.xcodeJobs) jobs")
-                    .font(.caption2).foregroundColor(m.tight ? .orange : .secondary)
+            Card("Graphics · Radeon Pro 575X") {
+                Text("GPU \(m.gpuUtil)% busy").font(.system(size: 11)).foregroundColor(Theme.sub)
+            } content: {
+                SimpleBar(title: "Graphics memory", frac: Double(m.vramUsed) / Double(m.vramTotal),
+                          word: "\(mb(m.vramUsed)) of 4 GB", color: m.spilling ? Theme.bad : Theme.info)
+                Text(String(format: "Spilled into memory %@ · %+.1f MB/s%@", mb(m.poolSeg["spill"] ?? 0), m.spillRate, m.spilling ? " · spilling now" : ""))
+                    .font(.system(size: 11)).foregroundColor(m.spilling ? Theme.bad : Theme.sub)
+                Text("Disk \(gb(m.diskFree)) free · saves in \(String(format: "%.1f", m.diskLat)) ms\(m.tight ? " · tight, limits start early" : "") · next Xcode build uses \(m.xcodeJobs) jobs")
+                    .font(.system(size: 11)).foregroundColor(m.tight ? Theme.warn : Theme.sub)
             }
-            Divider()
-            Group {
-                HStack {
-                    Text("CPU").font(.caption).foregroundColor(.secondary)
-                    Spacer()
-                    Text(m.temp.map { String(format: "%.0f °C", $0) } ?? "temp n/a").font(.caption)
-                    Text("speed limit \(m.speedLimit)%").font(.caption)
-                        .foregroundColor(m.speedLimit < 100 ? .red : .secondary)
-                }
-                HStack(spacing: 2) {
+            Card("Processor") {
+                Text(m.temp.map { String(format: "%.0f °C", $0) } ?? "temp n/a").font(.system(size: 11)).foregroundColor(Theme.sub)
+                Text("speed \(m.speedLimit)%").font(.system(size: 11)).foregroundColor(m.speedLimit < 100 ? Theme.bad : Theme.sub)
+            } content: {
+                HStack(spacing: 3) {
                     ForEach(Array(m.cores.enumerated()), id: \.offset) { _, v in
-                        VStack { Spacer(minLength: 0)
-                            Rectangle().fill(v > 85 ? Color.red : Color.accentColor).frame(height: CGFloat(v / 100 * 24)) }
-                            .frame(height: 24).background(Color.secondary.opacity(0.12))
+                        VStack(spacing: 0) {
+                            Spacer(minLength: 0)
+                            RoundedRectangle(cornerRadius: 2).fill(v > 85 ? Theme.bad : Theme.accent).frame(height: max(CGFloat(v / 100 * 32), 1))
+                        }
+                        .frame(maxWidth: .infinity).frame(height: 32)
+                        .background(RoundedRectangle(cornerRadius: 2).fill(Theme.line))
                     }
                 }
                 ForEach(m.topCPU) { p in
-                    HStack {
-                        Text(p.name).lineLimit(1); Spacer()
-                        Text(String(format: "%.0f%%", p.cpu)).monospacedDigit()
+                    ProcRow(name: p.name, value: String(format: "%.0f%%", p.cpu)) {
                         if m.throttled.contains(p.id) {
-                            Button("Unthrottle") { m.act(["unthrottle-pid", "\(p.id)"]) }
+                            Button("Full speed") { m.act(["unthrottle-pid", "\(p.id)"]) }
                         } else {
-                            Button("Throttle") { m.act(["throttle-pid", "\(p.id)"]) }
+                            Button("Slow down") { m.act(["throttle-pid", "\(p.id)"]) }
                         }
-                    }.font(.caption).buttonStyle(.borderless)
+                    }
                 }
             }
-            Divider()
-            Group {
-                Text("Top memory").font(.caption).foregroundColor(.secondary)
+            Card("Apps using the most memory") {
                 ForEach(m.topMem) { p in
-                    HStack(spacing: 6) {
-                        Text(p.name).lineLimit(1); Spacer()
-                        Text(mb(p.mem)).monospacedDigit()
+                    ProcRow(name: p.name, value: mb(p.mem)) {
                         if m.paused.contains(where: { $0.pid == "\(p.id)" }) {
                             Button("Resume") { m.act(["resume-pid", "\(p.id)"]) }
                         } else {
                             Button("Pause") { m.act(["pause-pid", "\(p.id)"]) }
                         }
-                        Button(m.bg.contains(p.id) ? "Fg" : "Bg") {
+                        Button(m.bg.contains(p.id) ? "Foreground" : "Background") {
                             m.act([m.bg.contains(p.id) ? "fg-pid" : "bg-pid", "\(p.id)"])
                         }
                         Button("Quit") { m.act(["quit-pid", "\(p.id)"]) }
-                    }.font(.caption).buttonStyle(.borderless)
+                    }
                 }
             }
             if !m.paused.isEmpty {
-                Divider()
-                HStack {
-                    Text("Paused (\(m.paused.count))").font(.caption).foregroundColor(.secondary)
-                    Spacer()
-                    Button("Resume all") { m.act(["resume", "all"]) }.font(.caption)
-                }
-                ForEach(m.paused, id: \.pid) { p in
-                    Text("\(p.name) · \(p.pid) · \(p.why)").font(.caption2).lineLimit(1)
+                Card("Paused (\(m.paused.count))") {
+                    Button("Resume all") { m.act(["resume", "all"]) }
+                } content: {
+                    ForEach(m.paused, id: \.pid) { p in
+                        Text("\(p.name) · \(p.why)").font(.system(size: 11)).foregroundColor(Theme.sub).lineLimit(1)
+                    }
                 }
             }
-            Divider()
-            HStack {
-                Spacer()
-                Button("Open settings file") { NSWorkspace.shared.open(URL(fileURLWithPath: MG_DIR + "/memguard.conf")) }
-            }.font(.caption)
         }
     }
 }
@@ -734,123 +865,134 @@ final class MaintModel: ObservableObject {
 
 func num(_ a: Any?) -> UInt64 { (a as? NSNumber)?.uint64Value ?? 0 }
 
-struct MaintView: View {
+struct CleanupView: View {
     @ObservedObject var mm: MaintModel
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                let score = (mm.health["score"] as? Int) ?? 0
-                Text("Health \(score)/100").font(.title3).bold()
-                    .foregroundColor(score >= 85 ? .green : score >= 65 ? .orange : .red)
+        let score = (mm.health["score"] as? Int) ?? 0
+        let why = (mm.health["why"] as? [String]) ?? []
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(alignment: .top) {
+                PageHeader(title: "Clean up", sub: "Junk, startup items, big files and apps you don't need.")
                 Spacer()
-                if let b = mm.busy { ProgressView().controlSize(.small); Text(b).font(.caption) }
-                Button("Full check") { mm.run("Checking…", ["all"]) }.disabled(mm.busy != nil)
+                BusyBadge(mm: mm)
             }
-            if mm.healthHist.count > 1 { Sparkline(values: mm.healthHist) }
-            ForEach((mm.health["why"] as? [String]) ?? [], id: \.self) { Text("• " + $0).font(.caption) }
-            Divider()
-            HStack {
-                Text("Cleanup").font(.caption).foregroundColor(.secondary)
-                Spacer()
-                Button("Scan") { mm.run("Scanning…", ["scan"]) }.font(.caption)
+            Card("Health") {
+                Button("Full check") { mm.run("Checking…", ["all"]) }.disabled(mm.busy != nil)
+            } content: {
+                HStack(spacing: 16) {
+                    ScoreRing(score: score, color: score >= 85 ? Theme.accent : score >= 65 ? Theme.warn : Theme.bad)
+                    VStack(alignment: .leading, spacing: 4) {
+                        if why.isEmpty { Text("Nothing is taking points off.").foregroundColor(Theme.sub) }
+                        ForEach(why, id: \.self) { Text("• " + $0).foregroundColor(Theme.sub).fixedSize(horizontal: false, vertical: true) }
+                    }
+                    Spacer(minLength: 0)
+                }
+                if mm.healthHist.count > 1 { Sparkline(values: mm.healthHist) }
+            }
+            Card("Junk") {
+                Button("Scan") { mm.run("Scanning…", ["scan"]) }
                 Button("Move selected to Trash") {
                     mm.run("Cleaning…", ["clean", mm.selected.joined(separator: ",")]); mm.selected = []
-                }.font(.caption).disabled(mm.selected.isEmpty || mm.busy != nil)
+                }.disabled(mm.selected.isEmpty || mm.busy != nil)
+            } content: {
+                if mm.junk.isEmpty { Text("Click Scan to look for junk.").foregroundColor(Theme.sub) }
+                ForEach(Array(mm.junk.enumerated()), id: \.offset) { _, c in
+                    let id = c["id"] as? String ?? "", action = c["action"] as? String ?? ""
+                    HStack(spacing: 8) {
+                        if action == "trash" {
+                            Toggle("", isOn: Binding(get: { mm.selected.contains(id) },
+                                                     set: { if $0 { mm.selected.insert(id) } else { mm.selected.remove(id) } }))
+                                .labelsHidden().toggleStyle(.checkbox)
+                        } else { Color.clear.frame(width: 14, height: 14) }
+                        Text(c["title"] as? String ?? "").lineLimit(1).foregroundColor(Theme.text)
+                        Spacer()
+                        Text(mb(num(c["size"]))).monospacedDigit().foregroundColor(Theme.sub)
+                    }.font(.system(size: 12))
+                }
+                Text("Moves to the Trash, so you can get it back. Empty the Trash yourself to free the space.")
+                    .font(.system(size: 11)).foregroundColor(Theme.sub)
             }
-            ForEach(Array(mm.junk.enumerated()), id: \.offset) { _, c in
-                let id = c["id"] as? String ?? "", action = c["action"] as? String ?? ""
-                HStack {
-                    if action == "trash" {
-                        Toggle("", isOn: Binding(get: { mm.selected.contains(id) },
-                                                 set: { if $0 { mm.selected.insert(id) } else { mm.selected.remove(id) } }))
-                            .labelsHidden().controlSize(.mini)
-                    } else { Text(" ").frame(width: 14) }
-                    Text(c["title"] as? String ?? "").lineLimit(1)
-                    Spacer()
-                    Text(mb(num(c["size"]))).monospacedDigit()
-                }.font(.caption)
+            Card("Startup items") {
+                Button("Refresh") { mm.run("Listing…", ["startup"]) }
+            } content: {
+                ForEach(Array(mm.startup.enumerated()), id: \.offset) { _, s in
+                    let label = s["label"] as? String ?? "", scope = s["scope"] as? String ?? ""
+                    let on = (s["loaded"] as? Bool) ?? false
+                    HStack(spacing: 8) {
+                        Circle().fill(on ? Theme.accent : Theme.line).frame(width: 7, height: 7)
+                        Text(label).lineLimit(1).truncationMode(.middle).foregroundColor(Theme.text)
+                        Spacer()
+                        Text(mb(num(s["rss"]))).monospacedDigit().foregroundColor(Theme.sub)
+                        if scope == "user" && !label.hasPrefix("com.user.memguard") && !label.hasPrefix("com.user.clearx") {
+                            Button(on ? "Turn off" : "Turn on") { mm.run("…", [on ? "disable" : "enable", label]) }
+                        } else { Text(scope == "login item" ? "Login Items" : "system").foregroundColor(Theme.sub) }
+                    }.font(.system(size: 12))
+                }
             }
-            Text("Moves to the Trash (recoverable). Empty the Trash yourself to free the space.").font(.caption2).foregroundColor(.secondary)
-            Divider()
-            HStack {
-                Text("Startup items").font(.caption).foregroundColor(.secondary)
+            Card("Large & old files") {
+                Button("Find") { mm.run("Searching…", ["large"]) }
+            } content: {
+                if mm.large.isEmpty { Text("Click Find to list them.").foregroundColor(Theme.sub) }
+                ForEach(Array(mm.large.prefix(6).enumerated()), id: \.offset) { _, f in
+                    let p = f["path"] as? String ?? ""
+                    ProcRow(name: (p as NSString).lastPathComponent, value: mb(num(f["size"]))) {
+                        Button("Show") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: p)]) }
+                    }
+                }
+            }
+            Card("Uninstall an app") {
+                HStack(spacing: 8) {
+                    TextField("App name, e.g. Zoom", text: $mm.appName).textFieldStyle(.roundedBorder)
+                    Button("Preview") { mm.run("Finding files…", ["uninstall", mm.appName]) }.disabled(mm.appName.isEmpty)
+                    Button("Uninstall") { mm.run("Uninstalling…", ["uninstall", mm.appName, "--apply"]) }.disabled(mm.appName.isEmpty)
+                }
+                Text("Preview first: it lists every file that would go.").font(.system(size: 11)).foregroundColor(Theme.sub)
+            }
+            OutputCard(mm: mm)
+        }
+    }
+}
+
+struct ChecksView: View {
+    @ObservedObject var mm: MaintModel
+    var body: some View {
+        let sec = mm.security
+        let mac = (mm.updates["macos"] as? [[String: Any]]) ?? [], brew = (mm.updates["brew"] as? [[String: Any]]) ?? []
+        let flagged = ((sec["persistence"] as? [[String: Any]]) ?? []).filter { ($0["flag"] as? Bool) ?? false }
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(alignment: .top) {
+                PageHeader(title: "Checks", sub: "Updates, security and speed settings.")
                 Spacer()
-                Button("Refresh") { mm.run("Listing…", ["startup"]) }.font(.caption)
+                BusyBadge(mm: mm)
             }
-            ForEach(Array(mm.startup.enumerated()), id: \.offset) { _, s in
-                let label = s["label"] as? String ?? "", scope = s["scope"] as? String ?? ""
-                let on = (s["loaded"] as? Bool) ?? false
-                HStack {
-                    Circle().fill(on ? Color.green : Color.secondary.opacity(0.4)).frame(width: 6, height: 6)
-                    Text(label).lineLimit(1)
-                    Spacer()
-                    Text(mb(num(s["rss"]))).monospacedDigit()
-                    if scope == "user" && !label.hasPrefix("com.user.memguard") && !label.hasPrefix("com.user.clearx") {
-                        Button(on ? "Disable" : "Enable") { mm.run("…", [on ? "disable" : "enable", label]) }
-                    } else { Text(scope == "login item" ? "Login Items" : "admin").foregroundColor(.secondary) }
-                }.font(.caption2).buttonStyle(.borderless)
-            }
-            Divider()
-            Group {
-                HStack {
-                    Text("Updates").font(.caption).foregroundColor(.secondary)
-                    Spacer()
-                    Button("Check") { mm.run("Checking updates…", ["updates"]) }.font(.caption)
-                    Button("Software Update") {
-                        NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.Software-Update-Settings.extension")!)
-                    }.font(.caption)
+            Card("Updates") {
+                Button("Check") { mm.run("Checking updates…", ["updates"]) }
+                Button("Software Update") {
+                    NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.Software-Update-Settings.extension")!)
                 }
-                ForEach(Array(((mm.updates["macos"] as? [[String: Any]]) ?? []).enumerated()), id: \.offset) { _, u in
-                    Text("macOS: \(u["title"] as? String ?? "") \(u["version"] as? String ?? "")\((u["restart"] as? Bool ?? false) ? " (restart)" : "")").font(.caption2)
+            } content: {
+                if mac.isEmpty && brew.isEmpty { CheckLine(ok: true, text: "Nothing waiting (as of the last check).") }
+                ForEach(Array(mac.enumerated()), id: \.offset) { _, u in
+                    CheckLine(ok: false, text: "macOS: \(u["title"] as? String ?? "") \(u["version"] as? String ?? "")\((u["restart"] as? Bool ?? false) ? " (needs a restart)" : "")")
                 }
-                ForEach(Array(((mm.updates["brew"] as? [[String: Any]]) ?? []).enumerated()), id: \.offset) { _, b in
-                    Text("brew: \(b["name"] as? String ?? "") → \(b["current"] as? String ?? "")").font(.caption2)
+                ForEach(Array(brew.enumerated()), id: \.offset) { _, b in
+                    CheckLine(ok: false, text: "\(b["name"] as? String ?? "") → \(b["current"] as? String ?? "")")
                 }
             }
-            Divider()
-            Group {
-                HStack {
-                    Text("Security").font(.caption).foregroundColor(.secondary)
-                    Spacer()
-                    Button("Audit") { mm.run("Auditing…", ["security"]) }.font(.caption)
-                }
-                let sec = mm.security
-                Text("XProtect \(sec["xprotect"] as? String ?? "?") · Remediator \(sec["xprotect_remediator"] as? String ?? "?") · SIP \(sec["sip"] as? String ?? "?")").font(.caption2)
-                Text("\(sec["gatekeeper"] as? String ?? "") · \(sec["filevault"] as? String ?? "") · \(sec["firewall"] as? String ?? "")").font(.caption2)
-                ForEach(Array(((sec["persistence"] as? [[String: Any]]) ?? []).filter { ($0["flag"] as? Bool) ?? false }.enumerated()), id: \.offset) { _, a in
-                    Text("⚠︎ \(a["label"] as? String ?? ""): \(a["detail"] as? String ?? "")").font(.caption2).foregroundColor(.orange)
+            Card("Security") {
+                Button("Audit") { mm.run("Auditing…", ["security"]) }
+            } content: {
+                Text("XProtect \(sec["xprotect"] as? String ?? "?") · Remediator \(sec["xprotect_remediator"] as? String ?? "?") · SIP \(sec["sip"] as? String ?? "?")")
+                    .foregroundColor(Theme.text)
+                Text("\(sec["gatekeeper"] as? String ?? "") · \(sec["filevault"] as? String ?? "") · \(sec["firewall"] as? String ?? "")")
+                    .foregroundColor(Theme.sub)
+                if flagged.isEmpty && !sec.isEmpty { CheckLine(ok: true, text: "Nothing suspicious starts with your Mac.") }
+                ForEach(Array(flagged.enumerated()), id: \.offset) { _, a in
+                    CheckLine(ok: false, text: "\(a["label"] as? String ?? ""): \(a["detail"] as? String ?? "")")
                 }
             }
-            Divider()
-            StorageView(mm: mm)
-            Divider()
             OptimizeView(mm: mm)
-            Divider()
-            HStack {
-                Text("Large & old files").font(.caption).foregroundColor(.secondary)
-                Spacer()
-                Button("Find") { mm.run("Searching…", ["large"]) }.font(.caption)
-            }
-            ForEach(Array(mm.large.prefix(6).enumerated()), id: \.offset) { _, f in
-                let p = f["path"] as? String ?? ""
-                HStack {
-                    Text((p as NSString).lastPathComponent).lineLimit(1)
-                    Spacer()
-                    Text(mb(num(f["size"])))
-                    Button("Reveal") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: p)]) }
-                }.font(.caption2).buttonStyle(.borderless)
-            }
-            Divider()
-            HStack {
-                TextField("App to uninstall (e.g. Zoom)", text: $mm.appName).textFieldStyle(.roundedBorder).font(.caption)
-                Button("Preview") { mm.run("Finding files…", ["uninstall", mm.appName]) }.font(.caption)
-                Button("Uninstall") { mm.run("Uninstalling…", ["uninstall", mm.appName, "--apply"]) }.font(.caption)
-                    .disabled(mm.appName.isEmpty)
-            }
-            if !mm.output.isEmpty {
-                ScrollView { Text(mm.output).font(.system(size: 9, design: .monospaced)).textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading) }.frame(height: 90)
-            }
+            OutputCard(mm: mm)
         }
     }
 }
@@ -864,106 +1006,60 @@ struct StoragePage: View {
         let total = Double(max(m.diskTotal, 1)), used = Double(m.diskTotal - m.diskFree - m.diskPurgeable)
         let ssd = mm.j["ssd"] as? [String: Any] ?? [:], days = ssd["days"] as? [String: Any] ?? [:]
         let today = { let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"; return f.string(from: Date()) }()
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Your drive").font(.title3).bold()
-            GeometryReader { g in
-                HStack(spacing: 0) {
-                    Rectangle().fill(Color.blue).frame(width: g.size.width * CGFloat(used / total))
-                    Rectangle().fill(Color.teal.opacity(0.6)).frame(width: g.size.width * CGFloat(Double(m.diskPurgeable) / total))
-                    Rectangle().fill(Color.secondary.opacity(0.18))
-                }
-            }.frame(height: 16).cornerRadius(4)
-            HStack(spacing: 14) {
-                Label("Used \(gb(UInt64(used)))", systemImage: "square.fill").foregroundColor(.blue)
-                Label("macOS can clear \(gb(m.diskPurgeable))", systemImage: "square.fill").foregroundColor(.teal)
-                Label("Free \(gb(m.diskFree))", systemImage: "square.fill").foregroundColor(.secondary)
-            }.font(.caption)
-            Text("“macOS can clear” is space macOS frees by itself when you need it (iCloud/Drive copies, caches). Finder counts it as available, so Finder shows \(gb(m.diskFree + m.diskPurgeable)) available.")
-                .font(.caption).foregroundColor(.secondary).fixedSize(horizontal: false, vertical: true)
-            Divider()
-            Text("Health and speed").font(.headline)
-            Text("• Type: \(d["kind"] as? String ?? "?") (\(d["model"] as? String ?? "?"), \(d["protocol"] as? String ?? "?")): a fast internal drive, not the old Fusion/hard-drive kind.")
-            Text("• Health check (SMART): \(d["smart"] as? String ?? "?")\((d["smart"] as? String) == "Verified" ? ": no signs of failure." : "")")
-            Text("• TRIM: \(d["trim"] as? String ?? "?")\((d["trim"] as? String) == "Yes" ? ": keeps the drive fast as it fills." : "")")
-            if !sp.isEmpty { Text("• Measured speed: writes \(num(sp["write_mb_s"])) MB/s. Fast enough; an external drive wouldn't help.") }
-            Text("• Written today: \(gb(num(days[today]))) (since the last restart \(gb(num(ssd["boot_w"]))). Most of this is memory overflow (swap); ClearX keeps it down, and more RAM would end it.")
-                .fixedSize(horizontal: false, vertical: true)
-            Divider()
-            StoragePlanView(mm: mm)
-            Divider()
-            HStack {
-                Text("What's using space").font(.headline)
+        let dups = (s["duplicates"] as? [[String: Any]]) ?? []
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(alignment: .top) {
+                PageHeader(title: "Storage", sub: "\(gb(m.diskFree + m.diskPurgeable)) available of \(gb(m.diskTotal))")
                 Spacer()
+                BusyBadge(mm: mm)
+            }
+            Card("Your drive") {
+                GeometryReader { g in
+                    HStack(spacing: 0) {
+                        Rectangle().fill(Theme.info).frame(width: g.size.width * CGFloat(used / total))
+                        Rectangle().fill(Theme.accent.opacity(0.5)).frame(width: g.size.width * CGFloat(Double(m.diskPurgeable) / total))
+                        Rectangle().fill(Theme.line)
+                    }
+                }.frame(height: 14).clipShape(Capsule())
+                HStack(spacing: 16) {
+                    legendDot(Theme.info, "Used \(gb(UInt64(used)))")
+                    legendDot(Theme.accent.opacity(0.5), "macOS can clear \(gb(m.diskPurgeable))")
+                    legendDot(Theme.line, "Free \(gb(m.diskFree))")
+                }.font(.system(size: 11)).foregroundColor(Theme.sub)
+                Text("“macOS can clear” is space macOS frees by itself when you need it (iCloud/Drive copies, caches). Finder counts it as available, so Finder shows \(gb(m.diskFree + m.diskPurgeable)) available.")
+                    .font(.system(size: 11)).foregroundColor(Theme.sub).fixedSize(horizontal: false, vertical: true)
+            }
+            Card("Health and speed") {
+                CheckLine(ok: true, text: "Type: \(d["kind"] as? String ?? "?") (\(d["model"] as? String ?? "?"), \(d["protocol"] as? String ?? "?")), a fast internal drive, not the old Fusion/hard-drive kind.")
+                CheckLine(ok: (d["smart"] as? String) == "Verified", text: "Health check (SMART): \(d["smart"] as? String ?? "?")\((d["smart"] as? String) == "Verified" ? ", no signs of failure." : "")")
+                CheckLine(ok: (d["trim"] as? String) == "Yes", text: "TRIM: \(d["trim"] as? String ?? "?")\((d["trim"] as? String) == "Yes" ? ", keeps the drive fast as it fills." : "")")
+                if !sp.isEmpty { CheckLine(ok: true, text: "Measured speed: writes \(num(sp["write_mb_s"])) MB/s. Fast enough; an external drive wouldn't help.") }
+                CheckLine(ok: num(days[today]) <= 100 << 30,
+                          text: "Written today: \(gb(num(days[today]))) (since the last restart \(gb(num(ssd["boot_w"])))). Most of this is memory overflow (swap); ClearX keeps it down, and more RAM would end it.")
+            }
+            Card("") { StoragePlanView(mm: mm) }
+            Card("What's using space") {
                 Button(mm.busy ?? "Measure again") { mm.run("Measuring…", ["storage"]) }.disabled(mm.busy != nil)
-            }
-            ForEach(Array(((s["map"] as? [[String: Any]]) ?? []).prefix(12).enumerated()), id: \.offset) { _, f in
-                let p = f["path"] as? String ?? ""
-                HStack {
-                    Text(p.replacingOccurrences(of: NSHomeDirectory() + "/Library/CloudStorage", with: "Google Drive (cloud copies)")
-                          .replacingOccurrences(of: NSHomeDirectory(), with: "~")).lineLimit(1).truncationMode(.middle)
-                    Spacer()
-                    Text(mb(num(f["size"]))).monospacedDigit()
-                    Button("Show") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: p)]) }.buttonStyle(.borderless)
-                }.font(.callout)
-            }
-            let dups = (s["duplicates"] as? [[String: Any]]) ?? []
-            Divider()
-            Text("Duplicate files (your documents and media only)").font(.headline)
-            if s["duplicates"] == nil { Text("Click “Measure again” to look for them.").foregroundColor(.secondary) }
-            else if dups.isEmpty { Text("None over 50 MB.").foregroundColor(.secondary) }
-            ForEach(Array(dups.prefix(10).enumerated()), id: \.offset) { _, g in
-                let paths = g["paths"] as? [String] ?? []
-                ForEach(Array(paths.dropFirst().enumerated()), id: \.offset) { _, p in  // the oldest copy is kept
-                    HStack {
-                        Text("\((p as NSString).lastPathComponent) · \(mb(num(g["size"])))").lineLimit(1).truncationMode(.middle)
-                        Spacer()
+            } content: {
+                ForEach(Array(((s["map"] as? [[String: Any]]) ?? []).prefix(12).enumerated()), id: \.offset) { _, f in
+                    let p = f["path"] as? String ?? ""
+                    ProcRow(name: p.replacingOccurrences(of: NSHomeDirectory() + "/Library/CloudStorage", with: "Google Drive (cloud copies)")
+                                   .replacingOccurrences(of: NSHomeDirectory(), with: "~"), value: mb(num(f["size"]))) {
                         Button("Show") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: p)]) }
-                        Button("Move to Trash") { mm.run("Moving to Trash…", ["trash", p]) }
-                    }.font(.callout).buttonStyle(.borderless)
+                    }
                 }
             }
-        }.font(.callout)
-    }
-}
-
-struct StorageView: View {
-    @ObservedObject var mm: MaintModel
-    var body: some View {
-        let s = mm.storage, d = s["drive"] as? [String: Any] ?? [:], sp = s["speed"] as? [String: Any] ?? [:]
-        VStack(alignment: .leading, spacing: 3) {
-            HStack {
-                Text("Storage").font(.caption).foregroundColor(.secondary)
-                Spacer()
-                Button("Scan storage") { mm.run("Measuring disk…", ["storage"]) }.font(.caption)
-            }
-            Text("\(d["kind"] as? String ?? "?") \(d["model"] as? String ?? "") · SMART \(d["smart"] as? String ?? "?") · TRIM \(d["trim"] as? String ?? "?")").font(.caption2)
-            Text("\(gb(num(d["free"]))) free + \(gb(num(d["purgeable"]))) purgeable of \(gb(num(d["size"])))\(sp.isEmpty ? "" : " · write \(num(sp["write_mb_s"])) / read \(num(sp["read_mb_s"])) MB/s")").font(.caption2)
-            Text("Local snapshots: \((s["snapshots"] as? [Any])?.count ?? 0)").font(.caption2)
-            let ssd = mm.j["ssd"] as? [String: Any] ?? [:], days = ssd["days"] as? [String: Any] ?? [:]
-            let today = { let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"; return f.string(from: Date()) }()
-            Text("SSD written: today \(gb(num(days[today]))) · since boot \(gb(num(ssd["boot_w"]))) (read \(gb(num(ssd["boot_r"]))))\(ssd["lifetime_w"] != nil ? " · lifetime \(gb(num(ssd["lifetime_w"])))" : "")")
-                .font(.caption2).foregroundColor(num(days[today]) > 100 << 30 ? .orange : .primary)
-            ForEach(Array(((s["map"] as? [[String: Any]]) ?? []).prefix(10).enumerated()), id: \.offset) { _, f in
-                let p = f["path"] as? String ?? ""
-                HStack {
-                    Text(p.replacingOccurrences(of: NSHomeDirectory(), with: "~")).lineLimit(1).truncationMode(.middle)
-                    Spacer()
-                    Text(mb(num(f["size"]))).monospacedDigit()
-                    Button("Reveal") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: p)]) }
-                }.font(.caption2).buttonStyle(.borderless)
-            }
-            let dups = (s["duplicates"] as? [[String: Any]]) ?? []
-            if !dups.isEmpty {
-                Text("Duplicates > 50 MB: \(dups.count) groups, \(gb(dups.reduce(0) { $0 + num($1["wasted"]) })) reclaimable").font(.caption2).bold()
-                ForEach(Array(dups.prefix(8).enumerated()), id: \.offset) { _, g in
+            Card("Duplicate files") {
+                Text("Your documents and media only. The oldest copy is always kept.").font(.system(size: 11)).foregroundColor(Theme.sub)
+                if s["duplicates"] == nil { Text("Click “Measure again” to look for them.").foregroundColor(Theme.sub) }
+                else if dups.isEmpty { CheckLine(ok: true, text: "None over 50 MB.") }
+                ForEach(Array(dups.prefix(10).enumerated()), id: \.offset) { _, g in
                     let paths = g["paths"] as? [String] ?? []
                     ForEach(Array(paths.dropFirst().enumerated()), id: \.offset) { _, p in  // the oldest copy is kept
-                        HStack {
-                            Text("\((p as NSString).lastPathComponent) · \(mb(num(g["size"])))").lineLimit(1).truncationMode(.middle)
-                            Spacer()
-                            Button("Reveal") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: p)]) }
-                            Button("Trash") { mm.run("Moving to Trash…", ["trash", p]) }
-                        }.font(.caption2).buttonStyle(.borderless)
+                        ProcRow(name: (p as NSString).lastPathComponent, value: mb(num(g["size"]))) {
+                            Button("Show") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: p)]) }
+                            Button("Move to Trash") { mm.run("Moving to Trash…", ["trash", p]) }
+                        }
                     }
                 }
             }
@@ -974,25 +1070,28 @@ struct StorageView: View {
 struct OptimizeView: View {
     @ObservedObject var mm: MaintModel
     var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            HStack {
-                Text("Optimize (max potential)").font(.caption).foregroundColor(.secondary)
-                Spacer()
-                Button("Measure") { mm.run("Measuring…", ["optimize"]) }.font(.caption)
-                Button("Apply safe") { mm.run("Applying…", ["optimize", "--apply"]) }.font(.caption)
-            }
+        Card("Speed settings") {
+            Button("Measure") { mm.run("Measuring…", ["optimize"]) }
+            Button("Apply safe ones") { mm.run("Applying…", ["optimize", "--apply"]) }
+        } content: {
+            if mm.optimize.isEmpty { Text("Click Measure to see what can be tuned.").foregroundColor(Theme.sub) }
             ForEach(Array(mm.optimize.enumerated()), id: \.offset) { _, i in
                 let st = i["status"] as? String ?? ""
-                VStack(alignment: .leading, spacing: 0) {
-                    HStack(alignment: .top) {
-                        Text(st).frame(width: 58, alignment: .leading)
-                            .foregroundColor(["ok", "applied", "n/a"].contains(st) ? .green : st == "hardware" ? .purple : .orange)
-                        Text("\(i["title"] as? String ?? ""): \(i["measured"] as? String ?? "")")
+                let good = ["ok", "applied", "n/a"].contains(st)
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(alignment: .top, spacing: 8) {
+                        Text(st).font(.system(size: 10, weight: .semibold))
+                            .foregroundColor(good ? Theme.accent : st == "hardware" ? Theme.info : Theme.warn)
+                            .padding(.horizontal, 6).padding(.vertical, 2).background(Capsule().fill(Theme.line))
+                            .frame(width: 72, alignment: .leading)
+                        Text("\(i["title"] as? String ?? ""): \(i["measured"] as? String ?? "")").foregroundColor(Theme.text)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
-                    if !["ok", "applied", "n/a"].contains(st), let a = i["action"] as? String, !a.isEmpty {
-                        Text("→ " + a).foregroundColor(.secondary).textSelection(.enabled).padding(.leading, 62)
+                    if !good, let a = i["action"] as? String, !a.isEmpty {
+                        Text("→ " + a).foregroundColor(Theme.sub).textSelection(.enabled).padding(.leading, 80)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
-                }.font(.caption2)
+                }.font(.system(size: 12))
             }
         }
     }

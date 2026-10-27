@@ -1,4 +1,4 @@
-# memguard v3: report for the iMac (2026-10-26)
+# ClearX (formerly memguard) v3.1: report for the iMac (2026-10-26)
 
 iMac19,1 · i9-9900K · 16 GB RAM (2 × 8 GB, 2 of 4 slots) · Radeon Pro 575X 4 GB · macOS 15.8.2
 
@@ -80,28 +80,29 @@ Both runs hit thermal throttling within the first minute, and the first one wrot
 - **With 48 GB (16 + 2×16):** the same workload leaves ~30 GB ready, so the reserve would hold without
   freezing anything.
 
-### B. "At least 250 GB free": not reachable with safe items alone
-Free now **87 GB**; 250 GB needs **163 GB more**. Everything that can go without losing your own files:
+### B. "At least 250 GB free": not reachable without removing your own music or projects
+Free now **87 GB**; 250 GB needs **163 GB more**. Checked read-only first: **MyDAW uses the Google Drive folder.**
+Its library roots include your Drive shared folders, and its Media screen reads `Tracks/MyDAW Library`. The Drive
+copy and `~/Music/X DAW Songs` are **not duplicates** (47 vs 78 songs, different names), so neither can go.
 
 | Item | Size | How |
 |---|---|---|
-| Google Drive "Tracks" folder kept offline on this Mac (same songs as ~/Music/X DAW Songs) | **103.5 GB** | Finder: right-click › Remove download. It stays in Drive |
-| iOS simulators + iPhone debug symbols (Xcode) | 17.1 GB | only if MyApp's iOS testing doesn't need them; re-downloadable |
+| Google Drive `Tracks/_Old Tracks (before MyDAW Library)`, downloaded on this Mac | **40.1 GB** | Finder: right-click › Remove download (stays in Drive) |
+| iOS simulators + iPhone debug symbols (Xcode) | 17.1 GB | only if MyApp's iOS testing doesn't need them |
 | Claude app data (mostly its sandbox VM image) | 11.3 GB | Claude settings |
 | Autodesk app data | 8.9 GB | if Autodesk apps are no longer used |
 | Codex runtimes cache | 1.6 GB | re-downloaded when used |
-| **Total** | **142.4 GB** | → about **230 GB free**, **~20 GB short of 250** |
+| **Total** | **79 GB** | → about **166 GB free**, **~84 GB short of 250** |
 
-The last ~20 GB would have to come from your own data: MyDAW's `XDAW/gold` work folder (12 GB) and `~/.cache/xdaw`
-(6.5 GB, the transcription models), or duplicates of your own files (Storage › Duplicates, after a scan).
-memguard deletes none of these. Each has a button on the Storage page.
+`Tracks/MyDAW Library` (63 GB) stays downloaded because MyDAW uses it. Reaching 250 GB would mean removing your own
+songs/projects or a bigger drive. ClearX deletes none of this; each item has a button on the Storage page.
 
 ## Self-tests (fake processes only, isolated state): `test/selftest-v3.log`
 All 8 passed:
 - Interactive builds: the fake clang goes to background QoS while you're active (Xcode cap 2–4) and is released when you're away.
 - Reserve: escalates to stage 3 when below target, stops when unreachable, releases when met.
-- App Freezer: a hidden, idle TextEdit was frozen; on activation MemGuard.app woke it **0.13 ms** after the
-  switch notification (~0.4 s end to end including `open -a`). With MemGuard.app gone, the daemon woke it.
+- App Freezer: a hidden, idle TextEdit was frozen; on activation ClearX.app woke it **0.13 ms** after the
+  switch notification (~0.4 s end to end including `open -a`). With ClearX.app gone, the daemon woke it.
 - The storage plan computes.
 - Bug found and fixed by the test: `pmset` prints a Bluetooth device name with non-UTF-8 bytes, which would have
   crashed every tick once the freezer was on.
@@ -109,6 +110,9 @@ All 8 passed:
 ## Gap-audit levers
 | Item | Status |
 |---|---|
+| Renamed to **ClearX** (app, CLI `clearx` + alias `memguard`, LaunchAgents); old MemGuard fully removed | **Done** |
+| `clearx run` heavy-job queue (own implementation of the idea) | **Done** |
+| Macs Fan Control removal (you approved) | **Needs you**: my removal was blocked by a safety rule; drag it to the Trash or use ClearX › Uninstall |
 | Build caps at the source | MyDAW's script hardcodes no `-j`. memguard now sets `CMAKE_BUILD_PARALLEL_LEVEL` + `MAKEFLAGS` via `launchctl setenv` with the 4/4/2 cap (no extra LaunchAgent: the daemon re-sets it). **Applied** |
 | MyDAW auto-update tree at background QoS | from its start while you're active; full speed after 2 min idle. **Applied** |
 | Brave `MemorySaverModeSavings=2`, `BackgroundModeEnabled=false` | **Applied** (user defaults); confirm in `brave://policy` after restarting Brave |

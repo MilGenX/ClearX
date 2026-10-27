@@ -892,14 +892,19 @@ def storage_plan(maint, goal_gb=250):
     add = lambda id_, title, size, how, action, note="": items.append(
         dict(id=id_, title=title, size=size, how=how, action=action, note=note))
     for acct in glob.glob(HOME + "/Library/CloudStorage/GoogleDrive-*"):
+        # one level inside each shared folder: MyDAW reads "MyDAW Library" straight from Drive (its library roots and
+        # the Media screen), so that folder is never suggested; old archives next to it are
         for top in glob.glob(acct + "/.shortcut-targets-by-id/*/*") + glob.glob(acct + "/My Drive"):
-            sz = du(top)
-            if sz >= 1 << 30:
-                add("drive:" + os.path.basename(top), f"Google Drive folder “{os.path.basename(top)}” is stored on this Mac",
-                    sz, "In Finder, right-click the folder › Remove download (or Google Drive › Settings › Google Drive › "
-                    "Stream files). It stays in Drive and downloads again when opened.", "reveal:" + top,
-                    "MyDAW reads its songs from ~/Music/X DAW Songs, which is a separate copy; check before removing "
-                    "if anything opens these files straight from Drive." if "Tracks" in top else "")
+            for sub in sorted(glob.glob(top + "/*")) or [top]:
+                if not os.path.isdir(sub) or os.path.basename(sub) == "MyDAW Library":
+                    continue
+                sz = du(sub)
+                if sz >= 1 << 30:
+                    add("drive:" + sub, f"Google Drive “{os.path.basename(sub)}” is downloaded on this Mac", sz,
+                        "In Finder, right-click the folder › Remove download. It stays in Google Drive and downloads "
+                        "again if opened.", "reveal:" + sub,
+                        "MyDAW scans your Drive for songs; this folder stays listed (as cloud files), only its local "
+                        "copy goes." if ".shortcut-targets-by-id" in sub else "")
     ios = du(HOME + "/Library/Developer/CoreSimulator/Devices") + du(HOME + "/Library/Developer/Xcode/iOS DeviceSupport")
     rt = re.search(r"Total Disk Images: \d+ \(([\d.]+)G\)", sh("xcrun", "simctl", "runtime", "list", timeout=60))
     ios += int(float(rt.group(1)) * (1 << 30)) if rt else 0

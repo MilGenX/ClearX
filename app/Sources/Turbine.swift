@@ -1,4 +1,5 @@
 // ClearX "Turbine" mark for the menu bar: four swept blades + hub, drawn as a template so macOS tints it.
+import AppKit
 func turbineImage() -> NSImage {
     let img = NSImage(size: NSSize(width: 16, height: 16), flipped: true) { r in
         let s = r.width / 100

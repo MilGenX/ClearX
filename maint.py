@@ -341,7 +341,7 @@ def _ver(plist):
 
 INTERPRETERS = {"sh", "bash", "zsh", "python3", "python", "osascript", "perl", "ruby", "node", "open", "env"}
 MINE = ("~/Developer/MacMemoryManager/", "~/Developer/XDAW/", "~/Developer/MYAPP/",
-        "~/Applications/MemGuard.app", "~/Library/Application Support/MyAppResign/")
+        "~/Applications/MemGuard.app", "~/Applications/ClearX.app", "~/Library/Application Support/MyAppResign/")
 
 
 def codesign_info(path):
@@ -872,7 +872,7 @@ def fix(what, log):
     """Only on the user's click. Admin changes go through the standard macOS password prompt."""
     if what == "hibernate":
         r = subprocess.run(["osascript", "-e", 'do shell script "/usr/bin/pmset -a hibernatemode 0" '
-                            'with prompt "MemGuard wants to stop the 16 GB sleep file." with administrator privileges'],
+                            'with prompt "ClearX wants to stop the 16 GB sleep file." with administrator privileges'],
                            capture_output=True, text=True)
         ok = r.returncode == 0
         log(f"MAINT fix hibernate: {'hibernatemode 0' if ok else 'cancelled'}  (undo: sudo pmset -a hibernatemode 3)")

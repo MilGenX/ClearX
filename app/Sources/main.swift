@@ -4,6 +4,7 @@ import SwiftUI
 import AppKit
 import IOKit
 import Darwin
+import UserNotifications
 
 let MG_DIR = NSString(string: "~/Developer/MacMemoryManager").expandingTildeInPath
 let MG_CLI = MG_DIR + "/clearx"
@@ -171,7 +172,7 @@ final class Model: ObservableObject {
     var cores: [Double] = [], topMem: [ProcInfo] = [], topCPU: [ProcInfo] = []
     var paused: [(pid: String, name: String, why: String)] = []
     var bg: Set<Int32> = [], throttled: Set<Int32> = []
-    var speedLimit = 100, temp: Double? = nil, enabled = true, tte: Double? = nil
+    var speedLimit = 100, hotSustained = false, temp: Double? = nil, enabled = true, tte: Double? = nil
     // the 20 GB pool from state.json (written by the daemon every tick)
     var poolSeg: [String: UInt64] = [:], poolTotal: UInt64 = 20 << 30, poolWhy: [String] = []
     var spillRate = 0.0, spilling = false, diskFree: UInt64 = 0, diskLat = 0.0, tight = false, xcodeJobs = 0
@@ -182,12 +183,32 @@ final class Model: ObservableObject {
     private var timer: Timer?
 
     init() {
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert]) { _, _ in }
         refresh()
         timer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in self?.refresh() }
     }
 
+    /// The daemon leaves its notifications in state/notify.json so they show ClearX's own name and icon
+    /// (osascript ones show Script Editor's); without notification permission, fall back to osascript.
+    func postNotice() {
+        let f = MG_DIR + "/state/notify.json"
+        guard let d = try? Data(contentsOf: URL(fileURLWithPath: f)),
+              let j = try? JSONSerialization.jsonObject(with: d) as? [String: Any] else { return }
+        try? FileManager.default.removeItem(atPath: f)
+        let title = j["title"] as? String ?? "", msg = j["msg"] as? String ?? ""
+        let c = UNMutableNotificationContent(); c.title = title; c.body = msg
+        UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: UUID().uuidString, content: c, trigger: nil)) { err in
+            guard err != nil else { return }
+            let esc = { (s: String) in s.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"") }
+            let p = Process(); p.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+            p.arguments = ["-e", "display notification \"\(esc(msg))\" with title \"ClearX\" subtitle \"\(esc(title))\""]
+            try? p.run()
+        }
+    }
+
     func refresh() {
         objectWillChange.send()
+        postNotice()
         let s = vmStats(), now = Date()
         freeB = UInt64(s.free_count + s.speculative_count) * pageSize
         availB = freeB + UInt64(s.inactive_count + s.purgeable_count) * pageSize
@@ -217,11 +238,6 @@ final class Model: ObservableObject {
         if let a = try? FileManager.default.attributesOfFileSystem(forPath: "/System/Volumes/Data") {
             diskTotal = (a[.systemSize] as? NSNumber)?.uint64Value ?? 1
         }
-        // what Finder calls "available" = free + purgeable (space macOS clears by itself when needed)
-        if let v = try? URL(fileURLWithPath: "/").resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]),
-           let imp = v.volumeAvailableCapacityForImportantUsage, UInt64(imp) > diskFree {
-            diskPurgeable = UInt64(imp) - diskFree
-        }
         loadNeeds()
         if let d = try? Data(contentsOf: URL(fileURLWithPath: STATE)),
            let j = try? JSONSerialization.jsonObject(with: d) as? [String: Any] {
@@ -229,6 +245,7 @@ final class Model: ObservableObject {
             mode = j["mode"] as? String ?? mode
             modeSetting = (j["mode_override"] as? String) ?? "auto"
             speedLimit = j["cpu_speed_limit"] as? Int ?? 100
+            hotSustained = j["thermal_sustained"] as? Bool ?? false
             tte = j["tte"] as? Double
             paused = ((j["paused"] as? [String: [String: Any]]) ?? [:]).map {
                 (pid: $0.key, name: $0.value["name"] as? String ?? "?", why: $0.value["why"] as? String ?? "")
@@ -246,6 +263,12 @@ final class Model: ObservableObject {
                 diskFree = num(p["disk_free"]); diskLat = (p["disk_lat"] as? NSNumber)?.doubleValue ?? 0
                 tight = p["tight"] as? Bool ?? false
             }
+        }
+        // what Finder calls "available" = free + purgeable (space macOS clears by itself when needed); after diskFree
+        // is read for this refresh
+        if let v = try? URL(fileURLWithPath: "/").resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]),
+           let imp = v.volumeAvailableCapacityForImportantUsage {
+            diskPurgeable = UInt64(max(imp, 0)) > diskFree ? UInt64(imp) - diskFree : 0
         }
     }
 
@@ -299,6 +322,8 @@ final class Model: ObservableObject {
 }
 
 func gb(_ b: UInt64) -> String { String(format: "%.1f GB", Double(b) / 1073741824) }
+/// Disk sizes the way Finder shows them (1 GB = 1,000,000,000 bytes), so the numbers match Finder's.
+func gbd(_ b: UInt64) -> String { String(format: "%.1f GB", Double(b) / 1e9) }
 func mb(_ b: UInt64) -> String { b >= 1 << 30 ? gb(b) : "\(b >> 20) MB" }
 
 // MARK: - views
@@ -484,7 +509,7 @@ struct Panel: View {
     }
     var cpuAvg: Double { m.cores.isEmpty ? 0 : m.cores.reduce(0, +) / Double(m.cores.count) }
     var cpuWord: (String, Color) {
-        m.speedLimit < 90 ? ("Too hot", Theme.bad) : m.speedLimit < 100 ? ("Warm", Theme.warn) :
+        m.hotSustained ? ("Hot", Theme.bad) : m.speedLimit < 100 ? ("Warm", Theme.warn) :
             cpuAvg > 80 ? ("Busy", Theme.info) : ("Good", Theme.accent)
     }
     var diskWord: (String, Color) {
@@ -547,11 +572,11 @@ struct Panel: View {
                       word: memWord.0, color: memWord.1,
                       detail: "\(gb(m.availB)) of 16 GB ready for apps right now")
             SimpleBar(title: "Processor", frac: cpuAvg / 100, word: cpuWord.0, color: cpuWord.1,
-                      detail: String(format: "%.0f%% busy%@", cpuAvg, m.speedLimit < 100 ? " · slowed by heat to \(m.speedLimit)%" : ""))
+                      detail: String(format: "%.0f%% busy%@", cpuAvg, m.hotSustained ? " · easing off background work to cool down" : m.speedLimit < 100 ? " · warm, cooling" : ""))
             Button(action: { open(0) }) {
                 SimpleBar(title: "Storage", frac: 1 - Double(m.diskFree + m.diskPurgeable) / Double(max(m.diskTotal, 1)),
                           word: diskWord.0, color: diskWord.1,
-                          detail: "\(gb(m.diskFree + m.diskPurgeable)) free of \(gb(m.diskTotal)) · SSD healthy\(m.ssdToday > 100 << 30 ? ", busy today" : "")")
+                          detail: "\(gbd(m.diskFree + m.diskPurgeable)) free of \(gbd(m.diskTotal)) · SSD healthy\(m.ssdToday > 100 << 30 ? ", busy today" : "")")
                     .contentShape(Rectangle())
             }.buttonStyle(.plain)
             if !m.needs.isEmpty {
@@ -773,12 +798,12 @@ struct DetailsView: View {
                           word: "\(mb(m.vramUsed)) of 4 GB", color: m.spilling ? Theme.bad : Theme.info)
                 Text(String(format: "Spilled into memory %@ · %+.1f MB/s%@", mb(m.poolSeg["spill"] ?? 0), m.spillRate, m.spilling ? " · spilling now" : ""))
                     .font(.system(size: 11)).foregroundColor(m.spilling ? Theme.bad : Theme.sub)
-                Text("Disk \(gb(m.diskFree)) free · saves in \(String(format: "%.1f", m.diskLat)) ms\(m.tight ? " · tight, limits start early" : "") · next Xcode build uses \(m.xcodeJobs) jobs")
+                Text("Disk \(gbd(m.diskFree)) free · saves in \(String(format: "%.1f", m.diskLat)) ms\(m.tight ? " · tight, limits start early" : "") · next Xcode build uses \(m.xcodeJobs) jobs")
                     .font(.system(size: 11)).foregroundColor(m.tight ? Theme.warn : Theme.sub)
             }
             Card("Processor") {
                 Text(m.temp.map { String(format: "%.0f °C", $0) } ?? "temp n/a").font(.system(size: 11)).foregroundColor(Theme.sub)
-                Text("speed \(m.speedLimit)%").font(.system(size: 11)).foregroundColor(m.speedLimit < 100 ? Theme.bad : Theme.sub)
+                Text("speed \(m.speedLimit)%").font(.system(size: 11)).foregroundColor(m.hotSustained ? Theme.bad : m.speedLimit < 100 ? Theme.warn : Theme.sub)
             } content: {
                 HStack(spacing: 3) {
                     ForEach(Array(m.cores.enumerated()), id: \.offset) { _, v in
@@ -1003,13 +1028,13 @@ struct StoragePage: View {
     @ObservedObject var mm: MaintModel
     var body: some View {
         let s = mm.storage, d = s["drive"] as? [String: Any] ?? [:], sp = s["speed"] as? [String: Any] ?? [:]
-        let total = Double(max(m.diskTotal, 1)), used = Double(m.diskTotal - m.diskFree - m.diskPurgeable)
+        let total = Double(max(m.diskTotal, 1)), used = Double(m.diskTotal) - Double(m.diskFree) - Double(m.diskPurgeable)  // (Double: no UInt64 underflow trap)
         let ssd = mm.j["ssd"] as? [String: Any] ?? [:], days = ssd["days"] as? [String: Any] ?? [:]
         let today = { let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"; return f.string(from: Date()) }()
         let dups = (s["duplicates"] as? [[String: Any]]) ?? []
         VStack(alignment: .leading, spacing: 16) {
             HStack(alignment: .top) {
-                PageHeader(title: "Storage", sub: "\(gb(m.diskFree + m.diskPurgeable)) available of \(gb(m.diskTotal))")
+                PageHeader(title: "Storage", sub: "\(gbd(m.diskFree + m.diskPurgeable)) available of \(gbd(m.diskTotal))")
                 Spacer()
                 BusyBadge(mm: mm)
             }
@@ -1022,11 +1047,11 @@ struct StoragePage: View {
                     }
                 }.frame(height: 14).clipShape(Capsule())
                 HStack(spacing: 16) {
-                    legendDot(Theme.info, "Used \(gb(UInt64(used)))")
-                    legendDot(Theme.accent.opacity(0.5), "macOS can clear \(gb(m.diskPurgeable))")
-                    legendDot(Theme.line, "Free \(gb(m.diskFree))")
+                    legendDot(Theme.info, "Used \(gbd(UInt64(max(used, 0))))")
+                    legendDot(Theme.accent.opacity(0.5), "macOS can clear \(gbd(m.diskPurgeable))")
+                    legendDot(Theme.line, "Free \(gbd(m.diskFree))")
                 }.font(.system(size: 11)).foregroundColor(Theme.sub)
-                Text("“macOS can clear” is space macOS frees by itself when you need it (iCloud/Drive copies, caches). Finder counts it as available, so Finder shows \(gb(m.diskFree + m.diskPurgeable)) available.")
+                Text("“macOS can clear” is space macOS frees by itself when you need it (iCloud/Drive copies, caches). Finder counts it as available, so Finder shows \(gbd(m.diskFree + m.diskPurgeable)) available.")
                     .font(.system(size: 11)).foregroundColor(Theme.sub).fixedSize(horizontal: false, vertical: true)
             }
             Card("Health and speed") {

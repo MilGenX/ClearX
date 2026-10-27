@@ -106,6 +106,17 @@ def save_state(st):
     os.replace(tmp, STATE_FILE)
 
 
+def state_lock():
+    """One writer of state.json at a time. The tick (every 10 s) and the app's calls (wake, boost, pause...) each load,
+    change and save it; without this one save drops the other's changes, e.g. a pause record (the process would
+    stay stopped with nothing left to resume it). Held until the process exits (or os.close)."""
+    import fcntl
+    os.makedirs(STATE_DIR, exist_ok=True)
+    fd = os.open(STATE_FILE + ".lock", os.O_RDWR | os.O_CREAT, 0o600)
+    fcntl.flock(fd, fcntl.LOCK_EX)
+    return fd
+
+
 _conf = None
 
 
@@ -346,12 +357,15 @@ def protected_set(conf):
 
 def eligible(procs, conf, st, include_paused=False):
     prot = protected_set(conf)
+    # [protected] apps: the app and everything it starts (MyApp: its node server, voice ID, tunnel)
+    apps = globs(conf.get("protected", "apps", fallback=""))
+    ptree = tree(procs, [p["pid"] for p in procs.values() if matches(p["name"], apps)]) if apps else set()
     rx = conf.get("test", "target_regex", fallback="").strip()
     me = {os.getpid(), os.getppid()}
     paused = {int(k) for k in st.get("paused", {})}
     out = []
     for p in procs.values():
-        if p["pid"] in me or "Z" in p["stat"] or matches(p["name"], prot):
+        if p["pid"] in me or "Z" in p["stat"] or matches(p["name"], prot) or p["pid"] in ptree:
             continue
         if p["pid"] in paused and not include_paused:
             continue
@@ -542,7 +556,7 @@ def set_xcode_jobs(n, st, dry, why):
 
 
 AUTO_BG = ("pool", "level", "budget", "spill", "thermal", "mode build", "interactive")
-ACTIVATIONS = os.path.join(STATE_DIR, "activations.json")  # written by MemGuard.app on every app switch
+ACTIVATIONS = os.path.join(STATE_DIR, "activations.json")  # written by ClearX.app on every app switch
 
 
 def hid_idle_s():
@@ -619,7 +633,10 @@ def freeze_tick(conf, st, procs, lvl, fpid, daws, compilers, now, dry, reserve_s
             continue
         if now - st.get("front_seen", {}).get(a["name"], since) < idle_s:
             continue
-        pids = tree(procs, [a["pid"]])
+        if st.get("cooldown", {}).get(str(a["pid"]), 0) > now:
+            continue  # just resumed by the max-freeze safety net: not straight back in
+        # a protected helper inside an app (a local AI server, a tunnel) is never frozen with it
+        pids = {x for x in tree(procs, [a["pid"]]) if x == a["pid"] or not matches(procs[x]["name"], never)}
         if pids & (held | busy_net):
             continue  # playing audio, holding a wake assertion, or downloading/uploading
         mem = sum(procs[x]["mem"] for x in pids)
@@ -627,16 +644,19 @@ def freeze_tick(conf, st, procs, lvl, fpid, daws, compilers, now, dry, reserve_s
             continue
         if matches(a["name"], renderer_only):  # browsers: only their tab renderers, never the main/GPU process
             pids = {x for x in pids if "(Renderer)" in procs[x]["name"]}
+        new = 0
         for x in sorted(pids):
             p = procs[x]
             if "T" in p["stat"]:
                 continue
             if pause(p, st, dry, f"frozen: {a['name']} hidden & idle {int((now - st.get('front_seen', {}).get(a['name'], since)) / 60)} min",
                      kind="freeze"):
-                st["paused"].get(str(x), {}).update(app=a["name"], root=a["pid"] if x == a["pid"] else None, app_pid=a["pid"])
-        if pids:
+                new += 1
+                if not dry:
+                    st["paused"][str(x)].update(app=a["name"], root=a["pid"] if x == a["pid"] else None, app_pid=a["pid"])
+        if new:  # (all already stopped: nothing new, no log line every tick)
             n += 1
-            log(f"FREEZE {a['name']} ({len(pids)} processes, {mem >> 20} MB)")
+            log(f"FREEZE {a['name']} ({new} processes, {mem >> 20} MB)")
     return n
 
 
@@ -729,7 +749,10 @@ def tick(dry=False, force=None):
             conf.getfloat("freezer", "max_min", fallback=60) * 60 if info.get("kind") == "freeze" else max_s
         if now - info["t"] >= limit:
             resume(int(k), st, f"max pause {limit / 60:g} min reached", cooldown_s=cool_s, dry=dry)
-            notify("Resumed after timeout", f"{info['name']} (pid {k}) was paused {int((now - info['t']) / 60)} min")
+            if info.get("kind") == "freeze":  # the app's own pid gets the cooldown the freezer checks
+                st.setdefault("cooldown", {})[str(info.get("app_pid", k))] = now + cool_s
+            else:  # (frozen apps: one notification per renderer would be a pile of them)
+                notify("Resumed after timeout", f"{info['name']} (pid {k}) was paused {int((now - info['t']) / 60)} min")
 
     # RAM reserve: keep `target` GB ready to use (free + file cache). Below it, one more step per tick:
     # 1 freeze hidden browser tabs' renderers + idle hidden apps (oldest/largest), 2 more of those even when the
@@ -800,7 +823,8 @@ def tick(dry=False, force=None):
             if matches(p["name"], compilers) and p["pid"] not in fg and "T" not in p["stat"]:
                 background(p, st, dry, "interactive: RAM reserve")
     I = conf["interactive"] if conf.has_section("interactive") else {}
-    if str(I.get("enabled", "false")).lower() == "true":
+    interactive = str(I.get("enabled", "false")).lower() == "true"
+    if interactive:
         idle = hid_idle_s()
         st["hid_idle"] = round(idle)
         if idle < float(I.get("active_s", 60)):  # you're using the Mac: builds yield to you
@@ -809,8 +833,15 @@ def tick(dry=False, force=None):
             auto = [p["pid"] for p in procs.values() if "mydaw-auto-update" in p["path"] or any(x in p["path"] for x in bp) or
                     (p["name"] in ("zsh", "bash", "sh") and "mydaw-auto-update" in cmdline(p["pid"]))] \
                 if any(p["name"] in ("zsh", "bash", "sh") for p in procs.values()) else []
-            updater = tree(procs, auto)  # MyDAW's auto-update build and tests, from the moment they start
+            updater = tree(procs, auto)  # MyDAW's auto-update build, from the moment it starts
+            # its tests are timing tests (audio): at background QoS they run 3x slower and fail, and a failed test
+            # keeps the update out. Shells neither: what they start later (the tests) would inherit background QoS.
+            tests = tree(procs, [p["pid"] for p in procs.values() if matches(p["name"], globs(I.get("tests", "ctest, *_tests")))])
             for p in procs.values():
+                if p["pid"] in tests or p["name"] in SHELLS:
+                    if str(p["pid"]) in st.get("bg", {}) and st["bg"][str(p["pid"])].get("why", "").startswith("interactive"):
+                        unbackground(p["pid"], st, "tests run at full speed", dry=dry)
+                    continue
                 if (matches(p["name"], compilers) or p["pid"] in updater) and p["pid"] not in fg and "T" not in p["stat"]:
                     background(p, st, dry, "interactive: you're using the Mac" + (" (auto-builder)" if p["pid"] in updater else ""))
         elif idle >= float(I.get("idle_s", 120)):
@@ -919,7 +950,10 @@ def tick(dry=False, force=None):
         elif now - st.get("level_since", now) >= conf.getfloat("resume", "unbackground_after_s", fallback=60):
             for k, info in list(st.get("bg", {}).items()):
                 w = info.get("why", "")
-                if w.startswith(AUTO_BG) and not (w.startswith("thermal") and spd < 100):
+                # interactive ones are the interactive block's: it releases them once you're away (releasing them
+                # here re-backgrounded them on the next tick: ~15 processes flipped every 10 s)
+                if w.startswith(AUTO_BG) and not (w.startswith("thermal") and spd < 100) \
+                        and not (interactive and w.startswith("interactive")):
                     unbackground(int(k), st, "pool healthy", dry=dry)
             st["over"] = {}
 
@@ -1207,6 +1241,7 @@ def snapshot():
 
 def boost(quit_names=None, as_json=False):
     """Speed Up: only real actions, then the measured before/after. Never purge, never SIGKILL."""
+    lk = state_lock()
     conf, st = load_conf(), load_state()
     before = snapshot()
     procs = add_footprint(proc_list())
@@ -1217,6 +1252,7 @@ def boost(quit_names=None, as_json=False):
     fg = tree(procs, ([fpid] if fpid else []) + [p["pid"] for p in procs.values() if matches(p["name"], daws)])
 
     if quit_names:  # graceful quit through the app itself (it asks to save unsaved documents)
+        os.close(lk)
         for name in quit_names:
             if matches(name, globs(NEVER_QUIT) + daws):
                 acts.append(f"skipped {name} (never quit by boost)"); continue
@@ -1238,6 +1274,8 @@ def boost(quit_names=None, as_json=False):
                 continue
             if p["mem"] >= 300 << 20 and background(p, st, False, "boost"):
                 acts.append(f"background QoS: {p['name']} ({p['pid']}, {p['mem'] >> 20} MB)")
+        save_state(st)
+        os.close(lk)
         # 3. orphaned compile jobs (their build is gone: parent is launchd)
         for p in procs.values():
             if matches(p["name"], compilers) and p["ppid"] == 1:
@@ -1284,7 +1322,6 @@ def boost(quit_names=None, as_json=False):
         if subprocess.run(["defaults", "read", "com.brave.Browser", "HighEfficiencyModeEnabled"],
                           capture_output=True, text=True).stdout.strip() == "1":
             acts.append("Brave Memory Saver is on: Brave discards inactive tabs itself (no outside switch exists)")
-        save_state(st)
         time.sleep(5)
     # idle apps: not frontmost for 30+ min, > 300 MB (memguard has watched since it started tracking)
     seen, since = st.get("front_seen", {}), st.get("front_track_t", now)
@@ -1301,7 +1338,9 @@ def boost(quit_names=None, as_json=False):
                              never=matches(a["name"], globs(NEVER_QUIT) + daws)))
     after = snapshot()
     r = dict(before=before, after=after, actions=acts, idle=sorted(idle, key=lambda x: -x["mem"]), t=now)
+    lk = state_lock()
     st = load_state(); st["boost"] = r; save_state(st)
+    os.close(lk)
     log(f"BOOST {len(acts)} actions; avail {before['avail'] >> 20} -> {after['avail'] >> 20} MB, "
         f"swap {before['swap'] >> 20} -> {after['swap'] >> 20} MB")
     if as_json:
@@ -1318,7 +1357,7 @@ def boost(quit_names=None, as_json=False):
         print(f"{'pressure':<22}{before['pressure']:>12}{after['pressure']:>12}\n{'load (1 min)':<22}"
               f"{before['load']:>12}{after['load']:>12}")
         if idle:
-            print("\nIdle apps (not used for 30+ min, > 300 MB). Quit with: memguard boost --quit \"App, App\"")
+            print("\nIdle apps (not used for 30+ min, > 300 MB). Quit with: clearx boost --quit \"App, App\"")
             for i in r["idle"]:
                 print(f"  [{'x' if i['safe'] else ' '}] {i['name']:<28} {i['mem'] >> 20:>6} MB  idle {i['idle_min']} min"
                       + ("  (never quit by boost)" if i["never"] else ""))
@@ -1529,6 +1568,8 @@ def main(argv):
     global _conf
     _conf = load_conf()
     cmd = argv[1] if len(argv) > 1 else "status"
+    if cmd in ("tick", "wake", "mode", "pause", "resume", "off"):
+        state_lock()  # released when this process exits
     if cmd == "tick":
         force = argv[argv.index("--force-level") + 1] if "--force-level" in argv else None
         tick(dry="--dry-run" in argv, force=force)
@@ -1570,6 +1611,7 @@ def main(argv):
     elif cmd == "throttle-loop":
         throttle_loop(int(argv[2]), float(argv[3]))
     elif cmd in ("pause-pid", "resume-pid", "bg-pid", "fg-pid", "quit-pid", "throttle-pid", "unthrottle-pid") and len(argv) > 2:
+        state_lock()
         return pid_action(cmd, int(argv[2]))
     elif cmd == "mode":
         st = load_state()
@@ -1603,11 +1645,11 @@ def main(argv):
         os.makedirs(STATE_DIR, exist_ok=True)
         open(OFF_FILE, "w").close()
         st = load_state()
-        resume_all(st, "memguard turned off")
+        resume_all(st, "ClearX turned off")
         for k in list(st.get("bg", {})):
-            unbackground(int(k), st, "memguard turned off")
+            unbackground(int(k), st, "ClearX turned off")
         for k in list(st.get("throttled", {})):
-            stop_throttle(int(k), st, "memguard turned off")
+            stop_throttle(int(k), st, "ClearX turned off")
         # the Xcode job cap is memguard's: off = Xcode's own default (one compile per CPU thread)
         subprocess.run(["defaults", "delete", "com.apple.dt.Xcode", "IDEBuildOperationMaxNumberOfConcurrentCompileTasks"],
                        capture_output=True)

@@ -1,2 +1,2 @@
 #!/bin/sh
-exec /usr/bin/python3 ~/Developer/MacMemoryManager/memguard.py "$@"
+exec /usr/bin/python3 ~/Developer/ClearX/clearx.py "$@"

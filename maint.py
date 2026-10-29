@@ -1,4 +1,4 @@
-"""memguard maintain - transparent CleanMyMac replacement.
+"""clearx maintain - transparent CleanMyMac replacement.
 
 Every action previews first with sizes. Removal = move to ~/.Trash (recoverable), logged.
 Nothing here empties the Trash, uses sudo, or touches system files.
@@ -340,8 +340,8 @@ def _ver(plist):
 
 
 INTERPRETERS = {"sh", "bash", "zsh", "python3", "python", "osascript", "perl", "ruby", "node", "open", "env"}
-MINE = ("~/Developer/MacMemoryManager/", "~/Developer/XDAW/", "~/Developer/MYAPP/",
-        "~/Applications/MemGuard.app", "~/Applications/ClearX.app", "~/Library/Application Support/MyAppResign/")
+MINE = ("~/Developer/ClearX/", "~/Developer/MyDAW/", "~/Developer/MYAPP/",
+        "~/Applications/ClearX.app", "~/Library/Application Support/MyAppResign/")
 
 
 def codesign_info(path):
@@ -521,7 +521,7 @@ def ssd_wear():
 def speed_test(mb=2048):
     """Sequential write (with fsync) and read of a temp file, then deletes it. Read may come from cache."""
     import tempfile
-    path = os.path.join(tempfile.gettempdir(), "memguard-speedtest.bin")
+    path = os.path.join(tempfile.gettempdir(), "clearx-speedtest.bin")
     buf = os.urandom(8 << 20)
     try:
         t = time.time()
@@ -736,7 +736,7 @@ def optimize(storage_info=None, apply=False, log=print):
         c = ln.strip()
         if re.search(r"(^|/)(node|[Pp]ython[0-9.]*)$", c):
             o = "MyApp app" if "/MyApp.app/" in c else "MyApp builder" if "/MYAPP/" in c else \
-                "Claude" if "Claude" in c or "/.claude/" in c else "ClearX" if "MacMemoryManager" in c else "other"
+                "Claude" if "Claude" in c or "/.claude/" in c else "ClearX" if "ClearX" in c else "other"
             owners[o] = owners.get(o, 0) + 1
     add("Background", "node / python processes", f"node {n1} ({human(nd)}), python {n2} ({human(py)}): " +
         ", ".join(f"{k} {v}" for k, v in sorted(owners.items(), key=lambda kv: -kv[1])),
@@ -789,7 +789,7 @@ def optimize(storage_info=None, apply=False, log=print):
     # spotlight
     add("Spotlight", "mds / mds_stores / mdworker CPU now", f"{_cpu(r'mds|mdworker'):.0f}%",
         "ok" if _cpu(r"mds|mdworker") < 20 else "info",
-        "System Settings > Spotlight > Search Privacy: add ~/Developer/XDAW/src/build, ~/Developer/XDAW/auto-src/build, "
+        "System Settings > Spotlight > Search Privacy: add ~/Developer/MyDAW/src/build, ~/Developer/MyDAW/auto-src/build, "
         "~/Developer/MYAPP/build, node_modules folders")
 
     # network

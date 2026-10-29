@@ -1,6 +1,6 @@
-// App Freezer, app side. The daemon (memguard.py) freezes hidden, idle, big apps with SIGSTOP while memory is
+// App Freezer, app side. The daemon (clearx.py) freezes hidden, idle, big apps with SIGSTOP while memory is
 // tight; this wakes them with SIGCONT the instant macOS activates them (Cmd-Tab, Dock, a click on a window),
-// and records every activation so the daemon knows what you've just used. If MemGuard.app isn't running,
+// and records every activation so the daemon knows what you've just used. If ClearX.app isn't running,
 // the daemon wakes everything and stops freezing.
 import SwiftUI
 import AppKit

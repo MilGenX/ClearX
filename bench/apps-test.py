@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""20-app test (memguard ON): open ~20 of your own apps + Brave tabs, let it settle, measure memory, CPU and
+"""20-app test (clearx ON): open ~20 of your own apps + Brave tabs, let it settle, measure memory, CPU and
 how fast each app comes to the front. Pass 2 repeats while a clean MyDAW build runs.
 Quits only the apps this test opened (politely; they were freshly opened with no documents).
   python3 bench/apps-test.py [--build-dir <cmake build dir>] [--settle 300]
@@ -8,7 +8,7 @@ import json, os, re, signal, subprocess, sys, time
 
 D = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.insert(0, D)
-import memguard as mg  # noqa: E402
+import clearx as mg  # noqa: E402
 
 APPS = ["Brave Browser", "MyDAW", "MyApp", "Xcode-16.4", "Music", "Mail", "Messages", "Notes", "Calendar", "Reminders",
         "Photos", "Maps", "Preview", "TextEdit", "System Settings", "Activity Monitor", "Terminal", "Claude", "ChatGPT",
@@ -88,7 +88,7 @@ def main():
     apps = [x for x in APPS if os.path.exists(f"/Applications/{x}.app") or os.path.exists(f"/System/Applications/{x}.app")
             or os.path.exists(f"/System/Applications/Utilities/{x}.app") or x == "Finder"]
     before = running_apps()
-    res = dict(start=time.time(), apps=apps, already_open=sorted(before), memguard="on")
+    res = dict(start=time.time(), apps=apps, already_open=sorted(before), clearx="on")
     print(f"opening {len(apps)} apps + {len(TABS)} Brave tabs", flush=True)
     w0 = mg.ssd_counters()[0]
     for x in apps:
@@ -123,7 +123,7 @@ def main():
 
     # quit only what this test opened (fresh, no documents): politely, SIGTERM as a fallback
     for name in opened:
-        if name in ("Finder", "Claude", "MemGuard"):
+        if name in ("Finder", "Claude", "ClearX"):
             continue
         r = subprocess.run(["osascript", "-e", f'tell application "{name}" to quit'], capture_output=True, timeout=30)
         if r.returncode != 0:

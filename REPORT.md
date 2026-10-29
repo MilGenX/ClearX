@@ -1,4 +1,4 @@
-# ClearX (formerly memguard) v3.1: report for the iMac (2026-10-26)
+# ClearX (formerly clearx) v3.1: report for the iMac (2026-10-26)
 
 iMac19,1 · i9-9900K · 16 GB RAM (2 × 8 GB, 2 of 4 slots) · Radeon Pro 575X 4 GB · macOS 15.8.2
 
@@ -52,9 +52,9 @@ Only you can fix: (1) finish the macOS 15.8.2 + Safari 27.2 install and restart 
 
 ## C. Benchmark: skipped at the user's request
 
-The full memguard OFF vs ON build benchmark and the 20-app test were **cancelled by the user** (2026-10-26
-19:58). There is no ON result, so this report makes **no measured claim** that memguard makes builds faster.
-What exists is two partial OFF runs (clean MyDAW Release build, Xcode's default 16 compiles at once, no memguard):
+The full clearx OFF vs ON build benchmark and the 20-app test were **cancelled by the user** (2026-10-26
+19:58). There is no ON result, so this report makes **no measured claim** that clearx makes builds faster.
+What exists is two partial OFF runs (clean MyDAW Release build, Xcode's default 16 compiles at once, no clearx):
 
 | Partial OFF run | Length | CPU speed limit (min) | Load (max) | Swapped out | SSD written | Min available |
 |---|---|---|---|---|---|---|
@@ -62,7 +62,7 @@ What exists is two partial OFF runs (clean MyDAW Release build, Xcode's default 
 | 19:57 (stopped when the test was cancelled) | 76 s | **76 %** | 13.9 | — | — | 6.6 GB |
 
 Both runs hit thermal throttling within the first minute, and the first one wrote 3.2 GB to the SSD in under
-4 minutes. Those are the two things memguard's build caps target. `bench/mydaw-bench.sh` (OFF vs ON) and
+4 minutes. Those are the two things clearx's build caps target. `bench/mydaw-bench.sh` (OFF vs ON) and
 `bench/apps-test.py` (20 apps, with/without a build) are ready if you ever want the numbers.
 
 ## Your two targets
@@ -73,7 +73,7 @@ Both runs hit thermal throttling within the first minute, and the first one wrot
   renderers only), then builds to 2 jobs at background QoS, then also recently used hidden apps.
 - **Where it can't hold:** 16 GB minus ~2.5 GB system (wired) leaves ~13.5 GB for everything else. When the
   app you're using plus a build need more than ~3.5 GB (an MyDAW build alone peaks at 3–6 GB of compilers), the
-  10 GB reserve can't be held without stopping the build. memguard then says so in the menu and doesn't
+  10 GB reserve can't be held without stopping the build. clearx then says so in the menu and doesn't
   throttle the build to chase it. Measured during this evening's auto-update build: 3.6–4 GB ready.
 - **Cost:** frozen apps' memory gets compressed or written to swap once (some SSD writes), and switching back
   to an app that was swapped out takes ~0.5–2 s the first time.
@@ -110,10 +110,10 @@ All 8 passed:
 ## Gap-audit levers
 | Item | Status |
 |---|---|
-| Renamed to **ClearX** (app, CLI `clearx` + alias `memguard`, LaunchAgents); old MemGuard fully removed | **Done** |
+| Renamed to **ClearX** (app, CLI `clearx` + alias `clearx`, LaunchAgents); old ClearX fully removed | **Done** |
 | `clearx run` heavy-job queue (own implementation of the idea) | **Done** |
 | Macs Fan Control removal (you approved) | **Needs you**: my removal was blocked by a safety rule; drag it to the Trash or use ClearX › Uninstall |
-| Build caps at the source | MyDAW's script hardcodes no `-j`. memguard now sets `CMAKE_BUILD_PARALLEL_LEVEL` + `MAKEFLAGS` via `launchctl setenv` with the 4/4/2 cap (no extra LaunchAgent: the daemon re-sets it). **Applied** |
+| Build caps at the source | MyDAW's script hardcodes no `-j`. clearx now sets `CMAKE_BUILD_PARALLEL_LEVEL` + `MAKEFLAGS` via `launchctl setenv` with the 4/4/2 cap (no extra LaunchAgent: the daemon re-sets it). **Applied** |
 | MyDAW auto-update tree at background QoS | from its start while you're active; full speed after 2 min idle. **Applied** |
 | Brave `MemorySaverModeSavings=2`, `BackgroundModeEnabled=false` | **Applied** (user defaults); confirm in `brave://policy` after restarting Brave |
 | Speed Up: `simctl shutdown all` when no build/test runs; Clean up: `simctl delete unavailable` | **Applied** |
@@ -136,13 +136,13 @@ All 8 passed:
 | Startup | Login items of apps in the Trash (stale BTM records) | 1: CleanMyMac X.app | **needs you** | System Settings > General > Login Items & Extensions: turn off the CleanMyMac X items (they disappear once the Trash is emptied) |
 | Background | Homebrew services running | none | **ok** | brew services stop <name> |
 | Background | Virtual machines | 0 running, 0 B | **ok** | cap the VM's memory in its app (e.g. 2 GB for a Linux VM; Docker Desktop: Settings > Resources) |
-| Background | node / python processes left running | node 1 (57.8 MB), python 3 (93.0 MB) | **info** | memguard status  # Quit the ones you don't need from the menu |
+| Background | node / python processes left running | node 1 (57.8 MB), python 3 (93.0 MB) | **info** | clearx status  # Quit the ones you don't need from the menu |
 | Background | Google Drive | not running | **ok** | Google Drive > Settings > Google Drive: Stream files (not Mirror) keeps the disk and RAM lower |
-| Dev | Xcode/xcodebuild parallel compiles | 8 (set by memguard from the pool: 4 healthy, 4 yellow, 2 pressure/hot (8 with more RAM)) | **applied** | — |
+| Dev | Xcode/xcodebuild parallel compiles | 8 (set by clearx from the pool: 4 healthy, 4 yellow, 2 pressure/hot (8 with more RAM)) | **applied** | — |
 | Dev | Xcode DerivedData location | default (~/Library/Developer/Xcode/DerivedData, internal SSD) | **ok** | — |
 | Dev | Xcode indexing | on (Xcode pauses it while building) | **ok** | — |
 | Dev | ccache for the MyDAW build | not installed | **needs OK** | brew install ccache; then in XDAW's build script: cmake -G Ninja -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache (the Xcode generator ignores compiler launchers) |
-| Dev | MyDAW auto-update interval | every 2 min | **info** | suggestion only (XDAW is not edited by memguard): 15-30 min is plenty; each check that finds a new commit starts a full Release build |
+| Dev | MyDAW auto-update interval | every 2 min | **info** | suggestion only (XDAW is not edited by clearx): 15-30 min is plenty; each check that finds a new commit starts a full Release build |
 | Browser | Brave Memory Saver (tab discarding) | policy on | **applied** | defaults write com.brave.Browser HighEfficiencyModeEnabled -bool true |
 | Browser | Brave hardware acceleration | on | **ok** | brave://settings/system > Use graphics acceleration |
 | Browser | Brave extensions / RAM | 0 extensions, 25 processes, 1.8 GB | **ok** | brave://extensions: each extension is a process |
@@ -171,9 +171,9 @@ All 8 passed:
 - Spotlight → Search Privacy: add the XDAW/MYAPP build folders and node_modules.
 - Ethernet instead of Wi-Fi if a cable is near (DNS is fine: 23 ms vs 18 ms for 1.1.1.1).
 - Macs Fan Control: your call. The partial OFF build already hit a 76 % CPU speed limit; the ON run will
-  show whether memguard's job cap keeps it at 100 % without a fan curve.
+  show whether clearx's job cap keeps it at 100 % without a fan curve.
 
 ## Files
-- `memguard.py` (pool controller, boost, bench run), `maint.py` (storage, optimize, health), `memguard.conf` ([pool]),
+- `clearx.py` (pool controller, boost, bench run), `maint.py` (storage, optimize, health), `clearx.conf` ([pool]),
   `app/Sources/main.swift` (pool bar, Speed Up, Storage, Optimize), `bench/mydaw-bench.sh`, README.md, uninstall.sh.
 - Backups of v2: `state/*.v2bak`.

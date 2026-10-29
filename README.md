@@ -1,18 +1,18 @@
-# ClearX (formerly memguard) v3.1
+# ClearX (formerly clearx) v3.1
 
-ClearX is the new name: the app is `~/Applications/ClearX.app`, the command is `clearx` (`memguard` still works as an
+ClearX is the new name: the app is `~/Applications/ClearX.app`, the command is `clearx` (`clearx` still works as an
 alias), and the LaunchAgents are `com.user.clearx` and `com.user.clearx.menubar`. File names in this folder
-(`memguard.py`, `memguard.conf`) are unchanged. ClearX is original code, not based on any other project.
+(`clearx.py`, `clearx.conf`) are unchanged. ClearX is original code, not based on any other project.
 
 A per-user resource governor for this iMac (iMac19,1: Intel i9-9900K, 16 GB RAM, Radeon Pro 575X
 with 4 GB VRAM, 5K display, macOS 15). It has two parts:
 
-- **`memguard.py`**: a daemon run every 10 s by a LaunchAgent. It runs RAM + VRAM as **one 20 GB
+- **`clearx.py`**: a daemon run every 10 s by a LaunchAgent. It runs RAM + VRAM as **one 20 GB
   pool** and acts on it, together with swap, CPU load, thermals and the disk.
 - **ClearX.app**: a native menu-bar app (SwiftUI, about 35 MB RSS, refreshes every 2 s). It
   shows the live numbers and has buttons for every action.
 
-**Safety rules:** memguard never sends SIGKILL, never touches root or system processes, and
+**Safety rules:** clearx never sends SIGKILL, never touches root or system processes, and
 never changes kernel, sysctl or SIP settings. Everything it pauses is resumed automatically, and
 `uninstall.sh` reverses every change it made.
 
@@ -26,7 +26,7 @@ browser's GPU process typically use about 1 GB of that 4 GB.
 
 When the 4 GB of VRAM is full, the GPU doesn't fail: macOS maps system RAM over PCIe (GART) and keeps
 going. That "spill" is visible in `ioreg` as `inUseSysMemoryBytes`. So the two memories really are one
-budget, and memguard v3 controls them as one:
+budget, and clearx v3 controls them as one:
 
 ```
 20 GB pool (16.0 RAM + 4.0 VRAM)  [AAAAAAAAAAAWWWWWWWWCCCCVVVVVVcccccccccccccccc......]####### swap
@@ -41,7 +41,7 @@ one priority order decides who gives way: **foreground app and DAW** (never touc
 **background apps**. The foreground app is the frontmost app and its helper processes (a build started
 from the foreground Terminal still counts as a build).
 
-| Situation | What memguard does, in order |
+| Situation | What clearx does, in order |
 |---|---|
 | Pool healthy (green, not swapping, ≥ 1.5 GB available) | Releases everything: resumes paused processes one per tick (smallest first), removes background QoS after 60 s calm, and sets Xcode to **4** parallel compiles for the next build (MyDAW compile jobs use ~1.4 GB each; 8 = ~11 GB) |
 | Yellow (swap ≥ 2 GB while swapping, or pressure warn) | Soft budgets apply; heavy and ≥ 500 MB background processes get `renice 10` + background QoS. Xcode cap **4**. Build mode backgrounds Brave |
@@ -55,16 +55,16 @@ from the foreground Terminal still counts as a build).
 The state only steps down one level per tick, so it doesn't flap between orange and green when
 swap-outs pause for a moment. The Xcode cap goes down at once and up only after 60 s.
 
-**Xcode parallelism.** memguard writes `IDEBuildOperationMaxNumberOfConcurrentCompileTasks` (4 / 4 / 2)
+**Xcode parallelism.** clearx writes `IDEBuildOperationMaxNumberOfConcurrentCompileTasks` (4 / 4 / 2)
 from the pool. Xcode and xcodebuild read it when a build *starts*, so it sets the next build's parallelism.
 For a build that's already running, the build guard does the live work (pausing the newest compile jobs).
-`memguard off` deletes the key (Xcode's own default: one compile per CPU thread).
+`clearx off` deletes the key (Xcode's own default: one compile per CPU thread).
 
 ## Maintenance (replaces CleanMyMac)
 
-`memguard maintain …` on the command line, or the **Maintain** tab in ClearX.app. It always
+`clearx maintain …` on the command line, or the **Maintain** tab in ClearX.app. It always
 previews with sizes first. Removing something moves it to `~/.Trash` (recoverable), and every
-move is logged in `logs/memguard.log` as `MAINT`. It never empties the Trash and never uses sudo.
+move is logged in `logs/clearx.log` as `MAINT`. It never empties the Trash and never uses sudo.
 
 | Command | What it does |
 |---|---|
@@ -82,19 +82,19 @@ move is logged in `logs/memguard.log` as `MAINT`. It never empties the Trash and
 | `maintain health` | One score from 0 to 100: memory 30, swap 15, thermal 15 (these three are the **average over the last 10 minutes**, so one heavy moment doesn't swing it), storage 15 (free % under 14 %, < 40 GB free for swap, SMART, drive type), updates 10, security 15. Scans never change the score by themselves. Recorded every 5 min, with 7 days of hourly history |
 | `maintain all` | All of the above except `large`, `clean`, `optimize` and the slow parts of `storage` |
 
-**Honest note on malware.** Moonlock went away with CleanMyMac. memguard is **not a signature
+**Honest note on malware.** Moonlock went away with CleanMyMac. clearx is **not a signature
 antivirus**. It relies on Apple's built-in XProtect and XProtect Remediator, which macOS updates
 automatically, plus Gatekeeper, SIP and the persistence audit above. On a Mac that only runs
 signed software from known developers, that's the main protection anyway.
 
 **Memory "free up".** CleanMyMac's button runs a `purge`-style flush. That empties the file cache,
 which macOS refills immediately, so it's cosmetic and makes the next app launches slower.
-memguard instead stops the processes that cause the pressure (pause, background QoS, build
+clearx instead stops the processes that cause the pressure (pause, background QoS, build
 guard, predictive) while it's happening.
 
 ### Side-by-side with CleanMyMac (2026-10-26)
 
-| | CleanMyMac X | memguard maintain |
+| | CleanMyMac X | clearx maintain |
 |---|---|---|
 | Junk found | 18.89 GB (its figure, mostly system and dev data) | 3.8 GB safe + 16.8 GB optional iOS dev data = **20.6 GB**, itemized with what each one is |
 | Removal | Deletes | Moves to Trash (recoverable) and logs it |
@@ -103,16 +103,16 @@ guard, predictive) while it's happening.
 | Malware | Moonlock signature engine | XProtect + Gatekeeper/SIP/FileVault status + persistence audit (no signature engine) |
 | Its own cost | about 335 MB RAM in 3 always-on processes plus a root helper | about 34 MB app + a daemon running about 0.2 s every 10 s, no root |
 
-CleanMyMac X was removed with memguard's own uninstaller (app + 19 leftovers = 208.5 MB to the
-Trash). Its root helper needs your password: `sudo ~/Developer/MacMemoryManager/remove-cleanmymac-admin.sh`.
+CleanMyMac X was removed with clearx's own uninstaller (app + 19 leftovers = 208.5 MB to the
+Trash). Its root helper needs your password: `sudo ~/Developer/ClearX/remove-cleanmymac-admin.sh`.
 
 ## What's fixed by hardware and what software can tune
 
-| Fixed by hardware (no software can change it) | Tunable (what memguard does) |
+| Fixed by hardware (no software can change it) | Tunable (what clearx does) |
 |---|---|
 | **4 GB of VRAM** on the Radeon. It's physical memory on the graphics card. **System RAM can't become VRAM** on an Intel Mac. The Apple Silicon `iogpu.wired_limit_mb` trick doesn't exist here. When VRAM is full, macOS pages textures over PCIe (GART), which is slow. | Run RAM + VRAM as one 20 GB pool: full VRAM is fine; when the GPU spills into RAM *under pressure*, the GPU-heavy background apps give way first |
 | **16 GB RAM** (2 × 8 GB DDR4-2666 in 2 of the 4 SO-DIMM slots). Not soldered: the rear hatch takes 260-pin DDR4-2666 SO-DIMMs, up to 64 GB (Apple's max). Measured 2026-10-26: 650 GB of SSD traffic in 3.7 h since boot, almost all swap. Adding 2 × 16 GB (32 GB total) is the only real fix. | Pause/renice/background hogs, cap compiler memory, predict exhaustion, auto-resume |
-| **i9-9900K thermal and power envelope.** The iMac's cooling can't hold all-core turbo, so it throttles under long loads. memguard never undervolts or disables Turbo. | CPU governor (background QoS, then duty-cycling), thermal watch, Xcode capped at 4 parallel compiles |
+| **i9-9900K thermal and power envelope.** The iMac's cooling can't hold all-core turbo, so it throttles under long loads. clearx never undervolts or disables Turbo. | CPU governor (background QoS, then duty-cycling), thermal watch, Xcode capped at 4 parallel compiles |
 | No GPU switching (iMac19,1 always uses the Radeon; `pmset gpuswitch` is irrelevant here) | Reduce Transparency/Motion lowers WindowServer GPU load at 5K (optional, your call) |
 
 ### RAM reserve, App Freezer, interactive-aware builds (v3.1)
@@ -130,26 +130,26 @@ Trash). Its root helper needs your password: `sudo ~/Developer/MacMemoryManager/
   frozen: the front app, anything holding a power assertion (audio playback, calls, downloads), anything that
   moved > 1 MB on the network in the last 30 s, DAWs, compilers, VMs and the protected/`never` lists. The
   daemon wakes everything when the pool is green and the reserve is met, when the freezer is off, or if
-  ClearX.app isn't running. `memguard wake [all|<app>]`, or tap "Frozen: N apps" in the menu.
+  ClearX.app isn't running. `clearx wake [all|<app>]`, or tap "Frozen: N apps" in the menu.
 - **Interactive-aware builds** (`[interactive]`). While you're using the Mac (keyboard/mouse in the last
   60 s), compile jobs and the whole MyDAW auto-update tree (build and tests) run at background QoS and the next
   build gets at most 4 jobs. After 2 min without input, they get full speed again.
-- **Build caps at the source.** With the Xcode cap, memguard also sets `CMAKE_BUILD_PARALLEL_LEVEL` and
+- **Build caps at the source.** With the Xcode cap, clearx also sets `CMAKE_BUILD_PARALLEL_LEVEL` and
   `MAKEFLAGS=-jN` in the launchd environment (`launchctl setenv`), so `cmake --build` and `make` started from
   launchd agents (like MyDAW's auto-update), Finder or new Terminal windows follow the same 4/4/2 cap.
-  `memguard off` and `uninstall.sh` unset them.
+  `clearx off` and `uninstall.sh` unset them.
 - **Other user-level settings** (all removed by `uninstall.sh`): Brave `MemorySaverModeSavings = 2` (maximum)
   and `BackgroundModeEnabled = false` (Brave doesn't keep running after its last window closes); check
   `brave://policy` to confirm Brave lists them. `NSAppSleepDisabled = YES` for MyDAW (`com.xdaw.app`), so App
   Nap never throttles it. Speed Up also shuts down booted iOS simulators when no build or test is running.
-- **Storage goal**: `memguard maintain plan 250` (and the Storage page) works out what it would take to have
+- **Storage goal**: `clearx maintain plan 250` (and the Storage page) works out what it would take to have
   250 GB free, item by item, with one button each. Nothing is deleted from there.
 
 ## Other controls (each tick)
 
 - **Swap gating.** macOS keeps swap allocated after pressure ends, so swap thresholds only count
   while the system is actively swapping (at least 8 MB swapped out per tick) or pressure isn't normal.
-- **Predictive.** memguard takes available memory (free + inactive + purgeable) and the swap-out
+- **Predictive.** clearx takes available memory (free + inactive + purgeable) and the swap-out
   rate over the last 30 s and projects the time to exhaustion. If that's under 60 s and less than
   3 GB is available, it goes to ORANGE early.
 - **Build guard.** It sums the memory of running compiler jobs (clang, swift-frontend, ld,
@@ -161,9 +161,9 @@ Trash). Its root helper needs your password: `sudo ~/Developer/MacMemoryManager/
   If it's still hot after another 60 s, it's duty-cycled with SIGSTOP/SIGCONT to 50 % of its time
   (cpulimit-style). It's released automatically when it calms down. `[cpu] watch` apps are only
   logged, never touched.
-- **Thermal.** memguard reads `pmset -g therm` every tick (see the pool table for what it does).
+- **Thermal.** clearx reads `pmset -g therm` every tick (see the pool table for what it does).
   The app also shows the CPU temperature from the SMC (no root needed).
-- **One mode: Max.** There's nothing to pick. memguard detects by itself when a DAW (MyDAW/XDAW, Logic,
+- **One mode: Max.** There's nothing to pick. clearx detects by itself when a DAW (MyDAW/XDAW, Logic,
   Ableton …) or a build (xcodebuild, SWBBuildService, ninja, make, cargo + compilers) is running, and
   that only changes priorities: with a DAW open, Brave, Google Drive, node, Python and VMs are kept at
   background QoS, per-app budgets are halved and the compiler budget is 3 GB; during a build, Brave is
@@ -171,7 +171,7 @@ Trash). Its root helper needs your password: `sudo ~/Developer/MacMemoryManager/
 - **Safety nets.** Anything paused longer than 15 min (60 min for build-guard jobs) is always
   resumed, with a notification. pid reuse is checked before any signal.
 - **Protected list.** WindowServer, Finder, Dock, loginwindow, kernel_task, Claude*, Xcode (the
-  app, not its compilers), Terminal, MemGuard, Spotlight/mds and other system UI processes. Add
+  app, not its compilers), Terminal, ClearX, Spotlight/mds and other system UI processes. Add
   your own on `[protected] user =`.
 
 ## The menu-bar app
@@ -186,29 +186,29 @@ The menu bar shows a colored dot and the available memory in GB. Clicking it ope
   16 GB sleep file, turn off CleanMyMac leftovers, clean old app caches, Reduce transparency, drive
   getting full). A button that needs admin rights shows the normal macOS password prompt, only when you
   click it.
-- **Details…**, the MemGuard on/off switch, and Quit
+- **Details…**, the ClearX on/off switch, and Quit
 
 **Details…** opens a window with everything else: the live 20 GB pool bar, GPU, per-core CPU, the top
 processes with Pause/Bg/Quit, the paused list (tab "Live"), and Cleanup, Storage, Optimize, Startup items,
 Updates, Security, Large files and the app uninstaller (tab "Clean up & checks").
 
-It reads its numbers natively (Mach, libproc, IOKit, SMC) and calls the `memguard` CLI for every
+It reads its numbers natively (Mach, libproc, IOKit, SMC) and calls the `clearx` CLI for every
 action, so the daemon's state file stays the single source of truth.
 
 Source: `app/Sources/main.swift`. Build: `app/build.sh` (swiftc, no Xcode project).
 
-### Speed Up (`memguard boost`)
+### Speed Up (`clearx boost`)
 
 CleanMyMac's "Speed up" mostly ran a `purge`, which empties the file cache that macOS refills at once.
-memguard's button does only real things, then shows the **measured** before/after (available, app
+clearx's button does only real things, then shows the **measured** before/after (available, app
 memory, compressed, swap, pressure, load):
 
-1. Resumes anything memguard paused that's no longer needed (when the pool isn't orange/red).
+1. Resumes anything clearx paused that's no longer needed (when the pool isn't orange/red).
 2. Moves every non-foreground app over 300 MB to background QoS. Each one is released the moment you
    switch to it.
 3. Ends orphaned compile jobs (clang/ld/swift-frontend whose build is gone) with SIGTERM.
 4. Restarts third-party user LaunchAgents that auto-restart (KeepAlive) and whose memory grew more than 2x
-   since memguard first saw them.
+   since clearx first saw them.
 5. Stops idle Homebrew services (`brew services start <name>` undoes it).
 6. Lists idle apps (not frontmost for 30+ min, over 300 MB) with checkboxes. **Quit selected** asks each
    app to quit through AppleScript, so it can ask you to save; nothing is force-quit. Only simple
@@ -216,7 +216,7 @@ memory, compressed, swap, pressure, load):
 
 Tab discarding stays Brave's own job (the Memory Saver policy is on); no outside switch exists for it.
 
-It reads its numbers natively (Mach, libproc, IOKit, SMC) and calls the `memguard` CLI for every
+It reads its numbers natively (Mach, libproc, IOKit, SMC) and calls the `clearx` CLI for every
 action, so the daemon's state file stays the single source of truth.
 
 Source: `app/Sources/main.swift`. Build: `app/build.sh` (swiftc, no Xcode project).
@@ -224,27 +224,27 @@ Source: `app/Sources/main.swift`. Build: `app/build.sh` (swiftc, no Xcode projec
 ## Commands
 
 ```
-memguard status | log [N] | json
-memguard tick --dry-run            # what it would do right now, without doing it
-memguard pause <name>              # matches EVERY process with that name; be specific
-memguard resume all | resume <name>
-memguard pause-pid|resume-pid|bg-pid|fg-pid|quit-pid|throttle-pid|unthrottle-pid <pid>
-memguard off | on                  # off = resume all, remove background QoS, stop throttles
-memguard bench [seconds]           # CSV in bench/: speed limit, load, swap rate, free, VRAM, GPU%
-memguard bench run <label> [--guard-swap 3G] [--guard-avail 500M] -- <command>
+clearx status | log [N] | json
+clearx tick --dry-run            # what it would do right now, without doing it
+clearx pause <name>              # matches EVERY process with that name; be specific
+clearx resume all | resume <name>
+clearx pause-pid|resume-pid|bg-pid|fg-pid|quit-pid|throttle-pid|unthrottle-pid <pid>
+clearx off | on                  # off = resume all, remove background QoS, stop throttles
+clearx bench [seconds]           # CSV in bench/: speed limit, load, swap rate, free, VRAM, GPU%
+clearx bench run <label> [--guard-swap 3G] [--guard-avail 500M] -- <command>
                                    # runs a workload, samples every 2 s, aborts it (SIGINT, then SIGTERM)
                                    # if swap grows > guard or available memory < guard; CSV + JSON in bench/
-memguard optimize [--apply]        # the max-potential checklist (see Maintenance)
-memguard boost [--quit "App, App"] # Speed Up (see above)
+clearx optimize [--apply]        # the max-potential checklist (see Maintenance)
+clearx boost [--quit "App, App"] # Speed Up (see above)
 clearx run "<label>" [--slots N] <command…>   # heavy-job queue: big jobs (builds, exports, model runs) wait
                                    # their turn, one (or N) at a time, only while memory isn't orange/red,
                                    # and run at background QoS. Waiting jobs say so in the Terminal
-memguard junk                      # READ-ONLY report of reclaimable disk space + delete commands
+clearx junk                      # READ-ONLY report of reclaimable disk space + delete commands
 ```
 
 ## Editing thresholds
 
-Edit `memguard.conf`. It's re-read every tick, so there's nothing to restart. Sections:
+Edit `clearx.conf`. It's re-read every tick, so there's nothing to restart. Sections:
 `[levels] [pool] [resume] [predict] [build_guard] [cpu] [modes] [mode.normal|build|studio] [heavy]
 [budgets] [protected] [vram]`. Set `dry_run = true` to watch decisions in the log without any
 signals being sent.
@@ -252,7 +252,7 @@ signals being sent.
 ## Other system changes (all reversed by uninstall.sh)
 
 - `com.apple.dt.Xcode IDEBuildOperationMaxNumberOfConcurrentCompileTasks` is now set by the daemon from
-  the pool (4 / 4 / 2) and read by Xcode/xcodebuild when each build starts. `memguard off` and
+  the pool (4 / 4 / 2) and read by Xcode/xcodebuild when each build starts. `clearx off` and
   `uninstall.sh` delete it.
 - `defaults write com.brave.Browser HighEfficiencyModeEnabled -bool true` (Memory Saver policy).
   Brave's own setting was already on (`high_efficiency_mode state=2`). Check `brave://policy`
@@ -272,10 +272,10 @@ signals being sent.
 
 Manual uninstall, equivalent to `uninstall.sh`:
 ```
-memguard off
-launchctl bootout gui/$(id -u)/com.user.memguard
-launchctl bootout gui/$(id -u)/com.user.memguard.menubar
-rm ~/Library/LaunchAgents/com.user.memguard*.plist ~/.local/bin/memguard
+clearx off
+launchctl bootout gui/$(id -u)/com.user.clearx
+launchctl bootout gui/$(id -u)/com.user.clearx.menubar
+rm ~/Library/LaunchAgents/com.user.clearx*.plist ~/.local/bin/clearx
 rm -rf ~/Applications/ClearX.app
 defaults delete com.apple.dt.Xcode IDEBuildOperationMaxNumberOfConcurrentCompileTasks
 defaults delete com.brave.Browser HighEfficiencyModeEnabled
@@ -286,9 +286,9 @@ tmutil removeexclusion ~/Library/Developer/Xcode/DerivedData
 
 `test/selftest.log` (v1), `test/selftest-v2.log` (v2) and `test/selftest-v3.log` (v3.1: freezer + wake,
 reserve, interactive builds, storage plan; run `python3 test/selftest-v3.py`) hold real runs. Each test used a config
-whose `target_regex` limited memguard to the test processes only:
+whose `target_regex` limited clearx to the test processes only:
 - build guard: three fake 600 MB `clang` jobs (`test/hog.c`) under a 1 GB budget
-- predictive: an incompressible hog growing 500 MB/s (memguard went orange and paused it at 500 MB)
+- predictive: an incompressible hog growing 500 MB/s (clearx went orange and paused it at 500 MB)
 - CPU governor: a 2-thread spinner (`test/spin.c`) was moved to background QoS, then duty-cycled
   to about 75 %, then manually unthrottled
 

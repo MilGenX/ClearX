@@ -6,7 +6,7 @@ up as the difference between the system total and the per-process sum.
   python3 bench/io-top.py [seconds]"""
 import ctypes, os, re, subprocess, sys, time
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
-import memguard as mg  # noqa: E402
+import clearx as mg  # noqa: E402
 
 lib = ctypes.CDLL("/usr/lib/libproc.dylib")
 

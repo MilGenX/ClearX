@@ -1,12 +1,12 @@
-// MemGuard menu-bar app. Reads live stats natively (Mach, libproc, IOKit, SMC) every 2 s,
-// reads memguard's state.json, and calls the memguard CLI for every action.
+// ClearX menu-bar app. Reads live stats natively (Mach, libproc, IOKit, SMC) every 2 s,
+// reads clearx's state.json, and calls the clearx CLI for every action.
 import SwiftUI
 import AppKit
 import IOKit
 import Darwin
 import UserNotifications
 
-let MG_DIR = NSString(string: "~/Developer/MacMemoryManager").expandingTildeInPath
+let MG_DIR = NSString(string: "~/Developer/ClearX").expandingTildeInPath
 let MG_CLI = MG_DIR + "/clearx"
 let STATE = MG_DIR + "/state/state.json"
 let OFF = MG_DIR + "/state/disabled"
@@ -731,7 +731,7 @@ struct DetailsView: View {
                     }.buttonStyle(.plain)
                 }
                 Spacer()
-                Button("Open settings file") { NSWorkspace.shared.open(URL(fileURLWithPath: MG_DIR + "/memguard.conf")) }
+                Button("Open settings file") { NSWorkspace.shared.open(URL(fileURLWithPath: MG_DIR + "/clearx.conf")) }
                     .buttonStyle(.plain).font(.system(size: 11)).foregroundColor(Theme.sub).padding(.horizontal, 10)
             }
             .padding(.vertical, 20).padding(.horizontal, 12)
@@ -854,7 +854,7 @@ struct DetailsView: View {
 }
 
 
-// MARK: - maintenance (CleanMyMac replacement); data comes from state/maint.json written by `memguard maintain`
+// MARK: - maintenance (CleanMyMac replacement); data comes from state/maint.json written by `clearx maintain`
 
 let MAINT = MG_DIR + "/state/maint.json"
 
@@ -970,7 +970,7 @@ struct CleanupView: View {
                         Text(label).lineLimit(1).truncationMode(.middle).foregroundColor(Theme.text)
                         Spacer()
                         Text(mb(num(s["rss"]))).monospacedDigit().foregroundColor(Theme.sub)
-                        if scope == "user" && !label.hasPrefix("com.user.memguard") && !label.hasPrefix("com.user.clearx") {
+                        if scope == "user" && !label.hasPrefix("com.user.clearx") {
                             Button(on ? "Turn off" : "Turn on") { mm.run("…", [on ? "disable" : "enable", label]) }
                         } else { Text(scope == "login item" ? "Login Items" : "system").foregroundColor(Theme.sub) }
                     }.font(.system(size: 12))
@@ -1133,7 +1133,7 @@ struct OptimizeView: View {
                 let word = st == "ok" || st == "n/a" ? "OK" : st == "applied" ? "Fixed" :
                     ["needs OK", "needs you"].contains(st) ? "Needs you" : "Info"
                 let a = i["action"] as? String ?? ""
-                let isCommand = a.range(of: #"(^|\s)(sudo|brew|defaults|kmutil|systemextensionsctl|clearx|memguard|cmake|xcrun)\s"#,
+                let isCommand = a.range(of: #"(^|\s)(sudo|brew|defaults|kmutil|systemextensionsctl|clearx|cmake|xcrun)\s"#,
                                         options: .regularExpression) != nil || a.contains(" | ")
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(alignment: .top, spacing: 8) {
@@ -1173,7 +1173,7 @@ func dotImage(_ c: NSColor) -> NSImage {
 }
 
 @main
-struct MemGuardApp: App {
+struct ClearXApp: App {
     @StateObject var m = Model()
     init() { _ = Freezer.shared }  // start waking frozen apps on activation from launch
     var body: some Scene {

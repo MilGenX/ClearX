@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ClearX (formerly memguard) - keeps a 16 GB Intel Mac fast and out of swap death.
+"""ClearX - keeps a 16 GB Intel Mac fast and out of swap death.
 
 Lowers priority (renice + taskpolicy background QoS), pauses (SIGSTOP) memory hogs,
 caps parallel compiler memory, predicts exhaustion from the trend, and resumes
@@ -23,12 +23,12 @@ Usage:
 import configparser, fnmatch, json, os, re, signal, subprocess, sys, time
 
 HOME = os.path.dirname(os.path.realpath(__file__))
-CONF = os.environ.get("MEMGUARD_CONF", os.path.join(HOME, "memguard.conf"))
-STATE_DIR = os.environ.get("MEMGUARD_STATE", os.path.join(HOME, "state"))
-LOG_DIR = os.environ.get("MEMGUARD_LOGS", os.path.join(HOME, "logs"))
+CONF = os.environ.get("CLEARX_CONF", os.path.join(HOME, "clearx.conf"))
+STATE_DIR = os.environ.get("CLEARX_STATE", os.path.join(HOME, "state"))
+LOG_DIR = os.environ.get("CLEARX_LOGS", os.path.join(HOME, "logs"))
 STATE_FILE = os.path.join(STATE_DIR, "state.json")
 OFF_FILE = os.path.join(STATE_DIR, "disabled")
-LOG_FILE = os.path.join(LOG_DIR, "memguard.log")
+LOG_FILE = os.path.join(LOG_DIR, "clearx.log")
 LEVELS = ["green", "yellow", "orange", "red"]
 PAGE = 4096
 MY_UID = os.getuid()
@@ -135,7 +135,7 @@ def log(msg):
     line = time.strftime("%Y-%m-%d %H:%M:%S ") + msg
     with open(LOG_FILE, "a") as f:
         f.write(line + "\n")
-    if sys.stdout.isatty() or os.environ.get("MEMGUARD_ECHO"):
+    if sys.stdout.isatty() or os.environ.get("CLEARX_ECHO"):
         print(line)
 
 
@@ -464,6 +464,110 @@ def resume_all(st, why):
         resume(pid, st, why)
 
 
+# ---------- build queue: one project builds/installs at a time ----------
+def queue_skipped(procs, conf):
+    """Builds that never wait in line ([queue] skip: X 2026-10-28, "and the queue": MyDAW's updates go in right away):
+    each matching script and everything under it, shells included (its cmake, xcodebuild, ctest)."""
+    Q = conf["queue"] if conf.has_section("queue") else {}
+    skip = [x.strip() for x in Q.get("skip", "").split(",") if x.strip()]
+    if not skip:
+        return set()
+    kids = {}
+    for p in procs.values():
+        kids.setdefault(p["ppid"], []).append(p["pid"])
+    todo = [p["pid"] for p in procs.values() if (p["name"] in SHELLS or p["name"].lower().startswith("python"))
+            and any(x in cmdline(p["pid"]) for x in skip)]
+    out = set()
+    while todo:
+        pid = todo.pop()
+        if pid not in out:
+            out.add(pid); todo += kids.get(pid, [])
+    return out
+
+
+def build_roots(procs, conf):
+    """Top-level build jobs, one per project run: MyDAW's auto-update script, `myapp.py build|install`, and any
+    xcodebuild / swift build / cmake / cargo / ninja / make not started by another of these."""
+    Q = conf["queue"] if conf.has_section("queue") else {}
+    tools = globs(Q.get("tools", "xcodebuild, swift-build, cmake, cargo, ninja, make"))
+    scripts = [x.strip() for x in Q.get("scripts", "mydaw-auto-update, myapp.py build, myapp.py install").split(",") if x.strip()]
+    cand = set()
+    for p in procs.values():
+        n = p["name"]
+        if matches(n, tools):
+            cand.add(p["pid"])
+        elif n in SHELLS or n.lower().startswith("python"):
+            c = cmdline(p["pid"])
+            if any(x in c for x in scripts):
+                cand.add(p["pid"])
+    cand -= queue_skipped(procs, conf)
+    roots = []
+    for pid in cand:  # keep only the outermost: a root whose ancestor is also a candidate belongs to that one
+        a, top = procs[pid]["ppid"], True
+        while a in procs and a > 1:
+            if a in cand:
+                top = False; break
+            a = procs[a]["ppid"]
+        if top:
+            roots.append(pid)
+    return roots
+
+
+def queue_tick(conf, st, procs, fg, dry):
+    Q = conf["queue"] if conf.has_section("queue") else {}
+    if str(Q.get("enabled", "true")).lower() != "true":
+        for k, i in list(st.get("paused", {}).items()):
+            if i.get("kind") == "queue":
+                resume(int(k), st, "build queue off", dry=dry)
+        return
+    roots = build_roots(procs, conf)
+    for pid in sorted(queue_skipped(procs, conf)):  # (one held in line before it was let skip it)
+        if st.get("paused", {}).get(str(pid), {}).get("kind") == "queue":
+            resume(pid, st, "build queue: skips the line", dry=dry)
+    known = st.setdefault("queue_t", {})
+    for r in roots:  # first-seen time = place in line (start time from ps, cached)
+        if str(r) not in known:
+            known[str(r)] = start_epoch(r) or time.time()
+    for k in list(known):
+        if int(k) not in roots:
+            known.pop(k)
+    order = sorted(roots, key=lambda r: known[str(r)])
+    groups = {r: tree(procs, [r]) for r in order}
+    tests = tree(procs, [p["pid"] for p in procs.values() if matches(p["name"], globs(conf.get("interactive", "tests", fallback="ctest, *_tests")))])
+    # the head of the line runs; so does anything you run in the app in front (Xcode, Terminal you're watching)
+    active = [r for r in order if groups[r] & fg] or []
+    active = set(active + order[:1])
+    # MyDAW's updater testing (its ctest, under a build that skips the line): its timing tests miss beside another
+    # build (X 2026-10-28: MyApp's tests next to MyDAW's player test failed it twice), so every other build waits meanwhile.
+    skipped = queue_skipped(procs, conf)
+    if any(procs[p]["name"] == "ctest" for p in skipped if p in procs):
+        active = set()
+    st["build_queue"] = [dict(pid=r, name=procs[r]["name"], what=cmdline(r)[:120], running=r in active) for r in order]
+    held_by_q = {int(k) for k, i in st.get("paused", {}).items() if i.get("kind") == "queue"}
+    run_pids = set().union(*[groups[r] for r in active]) if active else set()
+    for pid in sorted(held_by_q & run_pids, reverse=True):  # its turn: children first, then the parent
+        resume(pid, st, "build queue: its turn", dry=dry)
+    for pid in sorted(held_by_q - set(procs)):
+        st["paused"].pop(str(pid), None)
+    # a project's own "stuck run" timer must not count time spent waiting in line (MyDAW kills runs > 30 min)
+    if any(r not in active for r in order):
+        for f in [x.strip() for x in Q.get("keep_fresh", "").split(",") if x.strip()]:
+            try:
+                os.utime(f)
+            except OSError:
+                pass
+    for r in order:
+        if r in active:
+            continue
+        for pid in sorted(groups[r]):  # parents first so nothing new starts
+            p = procs[pid]
+            if pid in fg or pid in tests or "T" in p["stat"] or "Z" in p["stat"] or str(pid) in st.get("paused", {}):
+                continue
+            if " --test" in cmdline(pid):  # (a test run already going finishes: MyApp's node --test)
+                continue
+            pause(p, st, dry, f"build queue: waits for {procs[order[0]]['name']} (pid {order[0]})", kind="queue")
+
+
 # ---------- modes ----------
 def detect_mode(conf, procs, st):
     # one user-facing mode ("Max"); DAW/build detection only sets internal priorities
@@ -595,9 +699,9 @@ def net_active(st, now, min_bytes=1 << 20, window=30):
 
 
 def freeze_tick(conf, st, procs, lvl, fpid, daws, compilers, now, dry, reserve_stage=0):
-    """App Freezer: hidden, idle, big apps are stopped (SIGSTOP) while the pool is yellow+; MemGuard.app wakes
+    """App Freezer: hidden, idle, big apps are stopped (SIGSTOP) while the pool is yellow+; ClearX.app wakes
     them (SIGCONT) the instant they're activated. Everything is woken when the pool is green, the freezer is off,
-    or MemGuard.app isn't running (it's the one that wakes them)."""
+    or ClearX.app isn't running (it's the one that wakes them)."""
     F = conf["freezer"] if conf.has_section("freezer") else {}
     frozen = {k: i for k, i in st.get("paused", {}).items() if i.get("kind") == "freeze"}
     for k, i in list(frozen.items()):  # woken by the app (or by hand): forget
@@ -614,7 +718,7 @@ def freeze_tick(conf, st, procs, lvl, fpid, daws, compilers, now, dry, reserve_s
     except (OSError, ValueError):
         pass
     on = str(F.get("enabled", "false")).lower() == "true" or reserve_stage > 0
-    app_alive = any(p["name"] in ("ClearX", "MemGuard") for p in procs.values())
+    app_alive = any(p["name"] in ("ClearX",) for p in procs.values())
     healthy = lvl == 0 and reserve_stage < 2
     if frozen and (not on or healthy or not app_alive):
         why = "freezer off" if not on else "pool healthy and reserve met" if healthy else "ClearX.app not running"
@@ -673,6 +777,20 @@ def freeze_tick(conf, st, procs, lvl, fpid, daws, compilers, now, dry, reserve_s
 
 # ---------- the tick ----------
 def tick(dry=False, force=None):
+    _rq = os.path.join(os.path.dirname(os.path.abspath(__file__)), "state", "ps.req")
+    if os.path.exists(_rq):  # on-demand process snapshot for remote diagnosis
+        with open(_rq[:-3] + "txt", "w") as f:
+            f.write(sh("ps", "-axro", "pid=,ppid=,%cpu=,rss=,stat=,command=")[:200000])
+        os.rename(_rq, _rq + ".done")
+    _rr = os.path.join(os.path.dirname(_rq), "run.req")  # one-shot maintenance script, only from ./ops/
+    if os.path.exists(_rr):
+        name = os.path.basename(open(_rr).read().strip())
+        os.rename(_rr, _rr + ".done")
+        script = os.path.join(os.path.dirname(os.path.dirname(_rr)), "ops", name)
+        if name and os.path.isfile(script):
+            with open(_rr[:-3] + "out", "w") as f:  # detached: never blocks the tick
+                subprocess.Popen(["/usr/sbin/taskpolicy", "-b", "/usr/bin/perl", "-e", "alarm 900; exec @ARGV", "/bin/zsh", script],
+                                 stdin=subprocess.DEVNULL, stdout=f, stderr=subprocess.STDOUT, start_new_session=True)
     conf = load_conf()
     st = load_state()
     dry = dry or conf.getboolean("general", "dry_run", fallback=False)
@@ -768,6 +886,18 @@ def tick(dry=False, force=None):
     bmax_s = conf.getfloat("build_guard", "max_pause_min", fallback=60) * 60
     cool_s = conf.getfloat("resume", "repause_cooldown_min", fallback=10) * 60
     for k, info in list(st.get("paused", {}).items()):
+        if info.get("kind") == "queue":  # safety net: nothing waits in line forever
+            if now - info["t"] >= conf.getfloat("queue", "max_wait_min", fallback=180) * 60:
+                resume(int(k), st, "build queue: waited too long", dry=dry)
+            continue
+        if info.get("kind") == "hold":
+            hmax = conf.getfloat("interactive", "hold_max_min", fallback=120) * 60
+            if now - info["t"] >= hmax:  # active for hours: let builders catch up for a while
+                st["hold_off_until"] = now + conf.getfloat("interactive", "hold_break_min", fallback=20) * 60
+                for k2, i2 in list(st.get("paused", {}).items()):
+                    if i2.get("kind") == "hold":
+                        resume(int(k2), st, f"held {hmax / 60:g} min: builders get a turn", dry=dry)
+            continue
         limit = bmax_s if info.get("kind") == "build" else \
             conf.getfloat("freezer", "max_min", fallback=60) * 60 if info.get("kind") == "freeze" else max_s
         if now - info["t"] >= limit:
@@ -905,6 +1035,7 @@ def tick(dry=False, force=None):
         for p in procs.values():
             if matches(p["name"], compilers) and p["pid"] not in fg and "T" not in p["stat"]:
                 background(p, st, dry, "interactive: RAM reserve")
+    queue_tick(conf, st, procs, fg, dry)
     I = conf["interactive"] if conf.has_section("interactive") else {}
     interactive = str(I.get("enabled", "false")).lower() == "true"
     if interactive:
@@ -929,6 +1060,17 @@ def tick(dry=False, force=None):
                     continue
                 if (matches(p["name"], compilers) or p["pid"] in updater) and p["pid"] not in fg and "T" not in p["stat"]:
                     background(p, st, dry, "interactive: you're using the Mac" + (" (auto-builder)" if p["pid"] in updater else ""))
+            # HOLD: automatic builders don't run at all while you use the Mac (backgrounding alone still let
+            # hundreds of short-lived node/clang workers load all 16 threads). Whole tree SIGSTOPped, parents
+            # first so nothing new spawns; tests already running finish (timing tests). Released once you're away.
+            hold_front = fpid in procs and matches(procs[fpid]["name"], globs(conf.get("protected", "apps", fallback="")))
+            if str(I.get("hold_auto", "true")).lower() == "true" and now >= st.get("hold_off_until", 0) and not hold_front:
+                held = st.setdefault("paused", {})
+                for pid in sorted(updater - tests):
+                    p = procs[pid]
+                    if pid in fg or "T" in p["stat"] or str(pid) in held or p["name"] in SHELLS and pid not in auto:
+                        continue
+                    pause(p, st, dry, "hold: auto-builder while you use the Mac", kind="hold")
             # local AI servers (MyApp's llama-server): never paused, but while you work in another app they run at
             # background QoS so the app in front stays snappy; full speed when their app is in front or you're away
             ai = [p for p in procs.values() if matches(p["name"], globs(I.get("ai_servers", "llama-server, ollama*")))]
@@ -940,6 +1082,9 @@ def tick(dry=False, force=None):
                 else:
                     background(p, st, dry, "interactive: AI server while you use another app")
         elif idle >= float(I.get("idle_s", 120)):
+            for k, info in sorted(st.get("paused", {}).items(), key=lambda kv: -int(kv[0])):  # children first
+                if info.get("kind") == "hold":
+                    resume(int(k), st, "you're away: auto-builder runs", dry=dry)
             for k, info in list(st.get("bg", {}).items()):
                 if info.get("why", "").startswith("interactive"):
                     unbackground(int(k), st, "you're away: full speed", dry=dry)
@@ -1044,7 +1189,7 @@ def tick(dry=False, force=None):
     # next orange swaps it back in: pause/resume flapping is pure SSD churn), then don't re-pause it for a while
     steady = now - st.get("level_since", now) >= conf.getfloat("resume", "steady_s", fallback=60)
     if lvl == 0 and calm and steady:
-        pp = [(k, i) for k, i in st.get("paused", {}).items() if i.get("kind") not in ("build", "freeze")]
+        pp = [(k, i) for k, i in st.get("paused", {}).items() if i.get("kind") not in ("build", "freeze", "hold", "queue")]
         if pp:
             k, info = min(pp, key=lambda kv: kv[1].get("mem", 0))
             resume(int(k), st, "pool healthy", dry=dry, cooldown_s=conf.getfloat("resume", "repause_cooldown_min", fallback=10) * 60)
@@ -1189,7 +1334,7 @@ def bench_run(label, cmd, guard_swap=None, guard_avail=None, step=2, logfile=Non
     base = os.path.join(HOME, "bench", time.strftime("run-%Y%m%d-%H%M%S-") + label)
     m0 = metrics()
     w0 = ssd_counters()[0]
-    r = dict(label=label, cmd=cmd, memguard="off" if os.path.exists(OFF_FILE) else "on", start=time.time(),
+    r = dict(label=label, cmd=cmd, clearx="off" if os.path.exists(OFF_FILE) else "on", start=time.time(),
              swap_start=m0["swap"], peak_swap=m0["swap"], min_free=m0["free"], min_avail=m0["avail"],
              min_speed=100, max_pressure=m0["pressure"], peak_compressed=m0["compressed"], max_load=0,
              peak_vram=0, peak_spill=0, aborted=None, xcode_jobs=subprocess.run(
@@ -1318,7 +1463,7 @@ def track_agents(st):
 
 SAFE_QUIT_DEFAULT = "Music, TV, Podcasts, News, Stocks, Weather, Maps, App Store, System Settings, Photos, Preview, " \
                     "Calculator, Dictionary, Font Book, Books, Home, Freeform"
-NEVER_QUIT = "Finder, Xcode*, Claude*, Terminal, iTerm2, ClearX, MemGuard, Dock, loginwindow, SystemUIServer"
+NEVER_QUIT = "Finder, Xcode*, Claude*, Terminal, iTerm2, ClearX, Dock, loginwindow, SystemUIServer"
 
 
 def gui_apps():
@@ -1366,7 +1511,7 @@ def boost(quit_names=None, as_json=False):
         # 1. release what is no longer needed: everything paused (non-build) when the pool isn't orange/red
         if LEVELS.index(st.get("level", "green")) < 2:
             for k, info in list(st.get("paused", {}).items()):
-                if info.get("kind") != "build" and resume(int(k), st, "boost"):
+                if info.get("kind") not in ("build", "queue", "hold") and resume(int(k), st, "boost"):
                     acts.append(f"resumed {info['name']} ({k})")
         # 2. every non-foreground heavy app to background QoS (released when you switch to it)
         prot = protected_set(conf)
@@ -1386,12 +1531,12 @@ def boost(quit_names=None, as_json=False):
                     log(f"BOOST SIGTERM orphaned {p['name']} pid={p['pid']}")
                 except OSError:
                     pass
-        # 4. leaky third-party LaunchAgents that restart themselves (KeepAlive): RSS > 2x what memguard first saw
+        # 4. leaky third-party LaunchAgents that restart themselves (KeepAlive): RSS > 2x what clearx first saw
         import plistlib
         for label, info in st.get("agent_rss", {}).items():
             pr = procs.get(info["pid"])
             pl = os.path.expanduser(f"~/Library/LaunchAgents/{label}.plist")
-            if not pr or label.startswith(("com.user.memguard", "com.user.clearx", "com.mydaw.")) or not os.path.exists(pl):
+            if not pr or label.startswith(("com.user.clearx", "com.mydaw.")) or not os.path.exists(pl):
                 continue
             try:
                 with open(pl, "rb") as f:
@@ -1424,12 +1569,12 @@ def boost(quit_names=None, as_json=False):
                           capture_output=True, text=True).stdout.strip() == "1":
             acts.append("Brave Memory Saver is on: Brave discards inactive tabs itself (no outside switch exists)")
         time.sleep(5)
-    # idle apps: not frontmost for 30+ min, > 300 MB (memguard has watched since it started tracking)
+    # idle apps: not frontmost for 30+ min, > 300 MB (clearx has watched since it started tracking)
     seen, since = st.get("front_seen", {}), st.get("front_track_t", now)
     safe = globs(conf.get("boost", "safe_quit", fallback=SAFE_QUIT_DEFAULT))
     idle = []
     for a in gui_apps():
-        if a["pid"] == fpid or a["name"] in ("ClearX", "MemGuard"):
+        if a["pid"] == fpid or a["name"] in ("ClearX",):
             continue
         mem = sum(procs[p]["mem"] for p in tree(procs, [a["pid"]]) if p in procs)
         idle_s = now - seen.get(a["name"], since)
@@ -1694,7 +1839,7 @@ def main(argv):
         if a[0] == "--slots":
             slots, a = int(a[1]), a[2:]
         return run_queued(argv[2], a, slots)
-    elif cmd == "wake":  # memguard wake [all|<app name>]: unfreeze
+    elif cmd == "wake":  # clearx wake [all|<app name>]: unfreeze
         st, name = load_state(), " ".join(argv[2:]) or "all"
         for k, i in list(st.get("paused", {}).items()):
             if i.get("kind") == "freeze" and (name == "all" or matches(i.get("app", ""), [name])):
@@ -1707,7 +1852,7 @@ def main(argv):
     elif cmd == "optimize":
         return maintain(["optimize"] + argv[2:])
     elif cmd == "bench" and len(argv) > 3 and argv[2] == "run":
-        # memguard bench run <label> [--guard-swap 3G] [--guard-avail 500M] -- <shell command>
+        # clearx bench run <label> [--guard-swap 3G] [--guard-avail 500M] -- <shell command>
         a = argv[3:]
         cmd_ = " ".join(a[a.index("--") + 1:]) if "--" in a else ""
         opt = lambda k: size(a[a.index(k) + 1]) if k in a else None
@@ -1757,7 +1902,7 @@ def main(argv):
             unbackground(int(k), st, "ClearX turned off")
         for k in list(st.get("throttled", {})):
             stop_throttle(int(k), st, "ClearX turned off")
-        # the Xcode job cap is memguard's: off = Xcode's own default (one compile per CPU thread)
+        # the Xcode job cap is clearx's: off = Xcode's own default (one compile per CPU thread)
         subprocess.run(["defaults", "delete", "com.apple.dt.Xcode", "IDEBuildOperationMaxNumberOfConcurrentCompileTasks"],
                        capture_output=True)
         for v in ("CMAKE_BUILD_PARALLEL_LEVEL", "MAKEFLAGS"):

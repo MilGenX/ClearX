@@ -67,3 +67,21 @@ or red pool state occurred). It is the one metric that didn't improve, so it's r
 
 In short, the big stalls (drive-write storms, heat throttling, swap bursts from MyApp's tests and AI) are gone. What's
 left is MyDAW's own build when it runs, and 16 GB's limit when everything is open at once.
+
+## MyDAW build, ClearX ON vs OFF (4-minute windows, 2026-10-30)
+
+Same clean MyDAW Release build, cut off after 240 s, run ON, OFF, ON (`bench/mydaw-window.sh`), so heat or other work
+drifting over the hour shows up as a difference between the two ON runs.
+
+| Metric | ON (1st) | OFF | ON (2nd) |
+|---|---|---|---|
+| Objects built in the window | 94 | 97 | 94 |
+| Swap-out | 0.75 GB | 2.23 GB | 0.20 GB |
+| Drive writes | 1.0 GB | 2.5 GB | 1.5 GB |
+| Worst memory pressure | normal | **warn** | normal |
+| Lowest ready memory | 3.4 GB | 2.7 GB | 3.3 GB |
+| Process start, p95 | 8.9 ms | 13.2 ms | 18.2 ms |
+
+ClearX costs about 3 % of build speed in a window this short and cuts swap-out by 66–91 %; only the OFF run reached
+the warn pressure level. Process start times overlap between runs (the 2nd ON run had the highest), so the Mac's
+feel during a build is within noise either way.

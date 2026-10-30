@@ -90,6 +90,69 @@ class Tick(unittest.TestCase):
         self.assertEqual(stages, [1, 2, 2, 2])
         self.assertFalse(fm.state["reserve"]["reachable"])
 
+    def queue(self):
+        """Two builds: 70 runs (older), 80 waits with a compile job (81) under it."""
+        fm = machine()
+        fm.procs[70] = proc(70, "make", 10 * MB, path="/usr/bin/make")
+        fm.procs[80] = proc(80, "make", 10 * MB, path="/usr/bin/make")
+        fm.procs[81] = proc(81, "clang", 300 * MB, ppid=80, path="/opt/clang")
+        return fm
+
+    def test_queue_holds_the_compile_jobs_of_a_waiting_build(self):
+        fm = self.queue()
+        for _ in range(4):
+            fm.tick(cx)
+        self.assertEqual(self.signals(fm, CONT), set())
+        self.assertEqual(fm.state["paused"]["81"]["kind"], "queue")
+        self.assertEqual(fm.procs[81]["stat"], "T")
+
+    def test_queue_releases_the_next_build_when_the_first_ends(self):
+        fm = self.queue()
+        fm.tick(cx)
+        del fm.procs[70]
+        fm.tick(cx)
+        self.assertEqual(fm.procs[81]["stat"], "S")
+        self.assertEqual(fm.state["paused"], {})
+
+    def test_queue_holds_again_after_being_woken_from_outside(self):
+        fm = self.queue()
+        fm.tick(cx)
+        fm.procs[80]["stat"] = fm.procs[81]["stat"] = "S"
+        fm.tick(cx)
+        self.assertEqual((fm.procs[80]["stat"], fm.procs[81]["stat"]), ("T", "T"))
+        self.assertTrue(any("woken from outside" in l for l in fm.logs))
+
+    def test_queue_lets_a_build_through_after_max_wait(self):
+        fm = self.queue()
+        fm.tick(cx)
+        fm.tick(cx, seconds=181 * 60)
+        fm.tick(cx)
+        self.assertEqual((fm.procs[80]["stat"], fm.procs[81]["stat"]), ("S", "S"))
+
+    def test_shell_that_only_mentions_a_build_is_not_in_line(self):
+        fm = self.queue()
+        fm.procs.pop(70)
+        fm.procs[60] = proc(60, "zsh", 5 * MB, path="/bin/zsh -c grep 'myapp.py build' notes.txt")
+        fm.procs[61] = proc(61, "sleep", MB, ppid=60, path="/bin/sleep")
+        st = fm.tick(cx)
+        self.assertEqual([q["pid"] for q in st["build_queue"]], [80])
+        self.assertEqual(self.signals(fm, STOP), set())
+
+    def test_real_build_started_from_a_shell_is_in_line(self):
+        fm = self.queue()
+        fm.procs[60] = proc(60, "zsh", 5 * MB, path="/bin/zsh -c python3 tools/myapp.py build")
+        fm.procs[61] = proc(61, "Python", 50 * MB, ppid=60, path="/usr/bin/python3 tools/myapp.py build")
+        st = fm.tick(cx)
+        self.assertIn(61, [q["pid"] for q in st["build_queue"]])
+        self.assertNotIn(60, [q["pid"] for q in st["build_queue"]])
+
+    def test_guard_still_takes_over_a_compile_job_paused_for_pressure(self):
+        fm = machine()
+        fm.procs[81] = proc(81, "clang", 300 * MB, stat="T", path="/opt/clang")
+        fm.state = dict(paused={"81": dict(name="clang", t=fm.clock, why="pool red", kind="pressure", start="start", mem=300 * MB)})
+        fm.tick(cx)
+        self.assertIn(81, self.signals(fm, CONT))
+
     def test_off_switch_does_nothing(self):
         fm = machine()
         cx.OFF_FILE = __file__  # exists

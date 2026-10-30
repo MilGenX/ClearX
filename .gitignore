@@ -3,6 +3,7 @@ logs/
 app/build/
 bench/work/
 bench/mydaw-bench.out
+bench/mydaw-window.out
 __pycache__/
 *.pyc
 test/bin/

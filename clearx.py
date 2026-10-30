@@ -594,6 +594,13 @@ def rate(hist, now, idx, win):
     return (r[-1][idx] - r[0][idx]) / (r[-1][0] - r[0][0])
 
 
+def swap_out_rate(hist, now, win):
+    """MB/s swapped out, averaged over the last win seconds; time with no history counts as no swapping, so one
+    busy tick right after a restart or wake-up doesn't read as a sustained rate."""
+    r = [h for h in hist if now - h[0] <= win + 1]
+    return sum(b[3] * (b[0] - a[0]) for a, b in zip(r, r[1:])) / win
+
+
 def pool_state(conf, st, m, g, now, swapping_mb):
     """One state for RAM + VRAM: green/yellow/orange/red plus what's driving it."""
     P = conf["pool"] if conf.has_section("pool") else {}
@@ -609,14 +616,17 @@ def pool_state(conf, st, m, g, now, swapping_mb):
     tight = disk_free < size(P.get("disk_min_free", "40G")) or lat_med >= float(P.get("disk_slow_ms", 50))
 
     swap_active = swapping_mb >= conf.getfloat("general", "swap_active_mb", fallback=8) or m["pressure"] > 1
-    eff_swap = m["swap"] if swap_active else 0
+    # Levels come from what is happening now: macOS's pressure level, the swap-out rate over the last minute and the
+    # memory left. Allocated swap says nothing about now (macOS keeps it long after pressure ends), and neither does
+    # "free" (macOS keeps it low on purpose); together they had the pool red ~1000 times a day at normal pressure.
+    swap_rate = swap_out_rate(st.get("hist", []), now, float(L.get("swap_window_s", 60)))
     why = []
-    if m["pressure"] >= 4 or eff_swap >= size(L["red_swap"]):
-        level = "red"; why.append("critical pressure" if m["pressure"] >= 4 else f"swapping with {m['swap'] >> 20}M swap")
-    elif eff_swap >= size(L["orange_swap"]) or (swap_active and m["free"] < size(L["orange_free"])):
-        level = "orange"; why.append(f"swapping {swapping_mb:.0f}MB/tick, free {m['free'] >> 20}M")
-    elif eff_swap >= size(L["yellow_swap"]) or m["pressure"] >= 2:
-        level = "yellow"; why.append("pressure warn" if m["pressure"] >= 2 else f"swap {m['swap'] >> 20}M active")
+    if m["pressure"] >= 4 or (swap_rate >= float(L.get("red_swap_rate", 50)) and m["avail"] < size(L.get("red_avail", "2G"))):
+        level = "red"; why.append("critical pressure" if m["pressure"] >= 4 else f"swapping {swap_rate:.0f}MB/s, available {m['avail'] >> 20}M")
+    elif (m["pressure"] >= 2 or swap_rate >= float(L.get("orange_swap_rate", 25))) and m["avail"] < size(L.get("orange_avail", "4G")):
+        level = "orange"; why.append(f"{'pressure warn' if m['pressure'] >= 2 else f'swapping {swap_rate:.0f}MB/s'}, available {m['avail'] >> 20}M")
+    elif m["pressure"] >= 2 or swap_rate >= float(L.get("yellow_swap_rate", 8)):
+        level = "yellow"; why.append("pressure warn" if m["pressure"] >= 2 else f"swapping {swap_rate:.0f}MB/s")
     else:
         level = "green"
     # storage-aware: swap on a nearly full or slow disk is what freezes the Mac, so tighten earlier

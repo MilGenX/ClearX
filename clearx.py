@@ -487,7 +487,8 @@ def queue_skipped(procs, conf):
 
 def build_roots(procs, conf):
     """Top-level build jobs, one per project run: MyDAW's auto-update script, `myapp.py build|install`, and any
-    xcodebuild / swift build / cmake / cargo / ninja / make not started by another of these."""
+    xcodebuild / swift build / cmake / cargo / ninja / make not started by another of these. `zsh -c` and `python -c`
+    only carry text: one that merely mentions a script isn't running it, and a real run shows up as its own process."""
     Q = conf["queue"] if conf.has_section("queue") else {}
     tools = globs(Q.get("tools", "xcodebuild, swift-build, cmake, cargo, ninja, make"))
     scripts = [x.strip() for x in Q.get("scripts", "mydaw-auto-update, myapp.py build, myapp.py install").split(",") if x.strip()]
@@ -498,7 +499,7 @@ def build_roots(procs, conf):
             cand.add(p["pid"])
         elif n in SHELLS or n.lower().startswith("python"):
             c = cmdline(p["pid"])
-            if any(x in c for x in scripts):
+            if " -c " not in c and any(x in c for x in scripts):
                 cand.add(p["pid"])
     cand -= queue_skipped(procs, conf)
     roots = []
@@ -542,6 +543,8 @@ def queue_tick(conf, st, procs, fg, dry):
     skipped = queue_skipped(procs, conf)
     if any(procs[p]["name"] == "ctest" for p in skipped if p in procs):
         active = set()
+    # nothing waits in line forever: whatever has waited max_wait_min runs alongside the rest
+    active |= {r for r in order if time.time() - known[str(r)] >= float(Q.get("max_wait_min", 180)) * 60}
     st["build_queue"] = [dict(pid=r, name=procs[r]["name"], what=cmdline(r)[:120], running=r in active) for r in order]
     held_by_q = {int(k) for k, i in st.get("paused", {}).items() if i.get("kind") == "queue"}
     run_pids = set().union(*[groups[r] for r in active]) if active else set()
@@ -879,6 +882,10 @@ def _drop_exited(c):
         if int(k) not in procs:
             st["paused"].pop(k)
             log(f"forget pid={k} (exited)")
+    for k, info in list(st.get("paused", {}).items()):  # (freeze_tick handles the frozen ones)
+        if info.get("kind") != "freeze" and "T" not in procs[int(k)]["stat"]:
+            st["paused"].pop(k)  # woken from outside: a stale record would keep it from ever being paused again
+            log(f"forget pid={k} {info['name']} (woken from outside)")
     for k, info in list(st.get("paused", {}).items()):
         if info["name"].startswith("com.apple.WebKit.") and info.get("why") != "manual":
             resume(int(k), st, "WebKit helpers are never paused")
@@ -1210,9 +1217,10 @@ def _pressure(c):
 def _build_guard(c):
     """Caps total compiler memory and job count. The oldest job always runs."""
     conf, st, dry, compilers, mode, lvl, P, elig, spd, spill_grace, stage = c.conf, c.st, c.dry, c.compilers, c.mode, c.lvl, c.P, c.elig, c.spd, c.spill_grace, c.stage
-    # compilers paused for pressure (by older versions, or by hand-off) belong to the build guard
+    # compilers paused for pressure (by older versions, or by hand-off) belong to the build guard; ones the queue or
+    # the hold keeps back aren't its to release (it resumed queued jobs as soon as there was room)
     for k, info in st.get("paused", {}).items():
-        if info.get("kind") != "build" and matches(info["name"], compilers) and info.get("why") != "manual":
+        if info.get("kind") in (None, "pressure") and matches(info["name"], compilers) and info.get("why") != "manual":
             info["kind"] = "build"
 
     # 5. build guard: summed compiler memory capped; the cap tightens with the pool (not during the spill grace),

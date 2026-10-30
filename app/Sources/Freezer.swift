@@ -25,14 +25,23 @@ final class Freezer: ObservableObject {
         timer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in self?.refresh() }
     }
 
-    /// The app and all its descendants (helpers, renderers).
+    private static let shells: Set<String> = ["zsh", "bash", "sh", "fish", "login", "tmux", "screen"]  // SHELLS in clearx.py
+
+    private static func name(_ pid: pid_t) -> String {
+        var buf = [CChar](repeating: 0, count: 256)
+        proc_name(pid, &buf, 256)
+        return String(cString: buf)
+    }
+
+    /// The app and its descendants (helpers, renderers), not through shells, like tree() in clearx.py: what a shell
+    /// started is a job of its own, and may be held for a reason that has nothing to do with this app being in front.
     static func tree(_ root: pid_t) -> [pid_t] {
         var out: [pid_t] = [], todo = [root]
         while let p = todo.popLast() {
             out.append(p)
             var kids = [pid_t](repeating: 0, count: 512)
             let n = proc_listchildpids(p, &kids, Int32(kids.count * MemoryLayout<pid_t>.size))
-            if n > 0 { todo += kids.prefix(Int(n)).filter { $0 > 0 && !out.contains($0) } }
+            if n > 0 { todo += kids.prefix(Int(n)).filter { $0 > 0 && !out.contains($0) && !shells.contains(name($0)) } }
         }
         return out
     }

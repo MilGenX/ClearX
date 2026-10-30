@@ -69,7 +69,8 @@ class FakeMachine:
         cx.gui_apps = lambda: copy.deepcopy(self.apps)
         cx.cmdline = lambda pid: self.procs.get(pid, {}).get("path", "")
         cx.start_time = lambda pid: "start"
-        cx.start_epoch = lambda pid: float(pid)
+        started = self.clock
+        cx.start_epoch = lambda pid: started + pid  # lower pids started earlier
         cx.hid_idle_s = lambda: self.idle
         cx.assertion_pids = lambda: set()
         cx.net_active = lambda st, now, **k: set()

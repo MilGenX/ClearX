@@ -1,8 +1,7 @@
-# ClearX (formerly clearx) v3.1
+# ClearX v3.1
 
-ClearX is the new name: the app is `~/Applications/ClearX.app`, the command is `clearx` (`clearx` still works as an
-alias), and the LaunchAgents are `com.user.clearx` and `com.user.clearx.menubar`. File names in this folder
-(`clearx.py`, `clearx.conf`) are unchanged. ClearX is original code, not based on any other project.
+The app is `~/Applications/ClearX.app`, the command is `clearx`, and the LaunchAgents are `com.user.clearx` and
+`com.user.clearx.menubar`. ClearX is original code, not based on any other project.
 
 A per-user resource governor for this iMac (iMac19,1: Intel i9-9900K, 16 GB RAM, Radeon Pro 575X
 with 4 GB VRAM, 5K display, macOS 15). It has two parts:
@@ -35,18 +34,19 @@ budget, and clearx v3 controls them as one:
 
 ### The pool controller (each tick)
 
-One state (green/yellow/orange/red) is computed from RAM pressure, the swap-out rate, free and
-compressed memory, predicted exhaustion, the GPU spill rate, the CPU speed limit and the disk. Then
-one priority order decides who gives way: **foreground app and DAW** (never touched) > **builds** >
+One state (green/yellow/orange/red) is computed from macOS's memory pressure level, the swap-out rate
+over the last minute, available memory, predicted exhaustion and the disk. Allocated swap and "free"
+memory don't count: macOS keeps swap allocated long after pressure ends and keeps free memory low on
+purpose. Then one priority order decides who gives way: **foreground app and DAW** (never touched) > **builds** >
 **background apps**. The foreground app is the frontmost app and its helper processes (a build started
 from the foreground Terminal still counts as a build).
 
 | Situation | What clearx does, in order |
 |---|---|
 | Pool healthy (green, not swapping, ≥ 1.5 GB available) | Releases everything: resumes paused processes one per tick (smallest first), removes background QoS after 60 s calm, and sets Xcode to **4** parallel compiles for the next build (MyDAW compile jobs use ~1.4 GB each; 8 = ~11 GB) |
-| Yellow (swap ≥ 2 GB while swapping, or pressure warn) | Soft budgets apply; heavy and ≥ 500 MB background processes get `renice 10` + background QoS. Xcode cap **4**. Build mode backgrounds Brave |
-| Orange (swap ≥ 3 GB while swapping, free < 1 GB while swapping, or exhaustion predicted < 60 s) | Also pauses the largest background process (≥ 200 MB). The compiler memory budget halves. Xcode cap **2** |
-| Red (swap ≥ 3.5 GB while swapping, or pressure critical) | Pauses every background process ≥ 500 MB; compiler budget is a quarter (the oldest job always runs) |
+| Yellow (swapping ≥ 8 MB/s over the last minute, or pressure warn) | Soft budgets apply; heavy and ≥ 500 MB background processes get `renice 10` + background QoS. Xcode cap **4**. Build mode backgrounds Brave |
+| Orange (swapping ≥ 25 MB/s or pressure warn, with < 4 GB available; or exhaustion predicted < 60 s) | Also pauses the largest background process (≥ 200 MB). The compiler memory budget halves. Xcode cap **2** |
+| Red (swapping ≥ 50 MB/s with < 2 GB available, or pressure critical) | Pauses every background process ≥ 500 MB; compiler budget is a quarter (the oldest job always runs) |
 | GPU spilling into RAM (≥ 8 MB/s over 30 s) while the pool is yellow+ | Backgrounds the GPU-heavy *background* apps first (WebKit GPU, Brave GPU, MTLCompilerService, VMs); the build guard waits 20 s before tightening the compiler budget |
 | CPU thermal throttling (`CPU_Speed_Limit` < 100) | First cuts compiler parallelism (at most 4 compile jobs at once, Xcode cap 2); if it's still throttling after 60 s, backgrounds the GPU-heavy/browser background apps too |
 | VRAM full but pool healthy | Nothing. Full VRAM is fine |
@@ -147,8 +147,6 @@ Trash). Its root helper needs your password: `sudo ~/Developer/ClearX/remove-cle
 
 ## Other controls (each tick)
 
-- **Swap gating.** macOS keeps swap allocated after pressure ends, so swap thresholds only count
-  while the system is actively swapping (at least 8 MB swapped out per tick) or pressure isn't normal.
 - **Predictive.** clearx takes available memory (free + inactive + purgeable) and the swap-out
   rate over the last 30 s and projects the time to exhaustion. If that's under 60 s and less than
   3 GB is available, it goes to ORANGE early.
@@ -216,11 +214,6 @@ memory, compressed, swap, pressure, load):
 
 Tab discarding stays Brave's own job (the Memory Saver policy is on); no outside switch exists for it.
 
-It reads its numbers natively (Mach, libproc, IOKit, SMC) and calls the `clearx` CLI for every
-action, so the daemon's state file stays the single source of truth.
-
-Source: `app/Sources/main.swift`. Build: `app/build.sh` (swiftc, no Xcode project).
-
 ## Commands
 
 ```
@@ -283,6 +276,10 @@ tmutil removeexclusion ~/Library/Developer/Xcode/DerivedData
 ```
 
 ## Tests
+
+`python3 -m unittest discover -s test` runs the unit tests: pool levels and whole ticks on a fake Mac
+(`test/fake_machine.py`), with no real processes or signals. `bench/replay-levels.py` replays the level
+rules over recorded samples.
 
 `test/selftest.log` (v1), `test/selftest-v2.log` (v2) and `test/selftest-v3.log` (v3.1: freezer + wake,
 reserve, interactive builds, storage plan; run `python3 test/selftest-v3.py`) hold real runs. Each test used a config

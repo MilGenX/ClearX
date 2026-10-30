@@ -6,3 +6,7 @@ bench/mydaw-bench.out
 __pycache__/
 *.pyc
 test/bin/
+.DS_Store
+clearx.conf.bak-*
+clearx.py.new
+diagnostics/

@@ -1,4 +1,4 @@
-# ClearX (formerly clearx) v3.1: report for the iMac (2026-10-26)
+# ClearX v3.1: report for the iMac (2026-10-26)
 
 iMac19,1 · i9-9900K · 16 GB RAM (2 × 8 GB, 2 of 4 slots) · Radeon Pro 575X 4 GB · macOS 15.8.2
 
@@ -110,7 +110,7 @@ All 8 passed:
 ## Gap-audit levers
 | Item | Status |
 |---|---|
-| Renamed to **ClearX** (app, CLI `clearx` + alias `clearx`, LaunchAgents); old ClearX fully removed | **Done** |
+| Renamed to **ClearX** (app, CLI `clearx`, LaunchAgents); the old name fully removed | **Done** |
 | `clearx run` heavy-job queue (own implementation of the idea) | **Done** |
 | Macs Fan Control removal (you approved) | **Needs you**: my removal was blocked by a safety rule; drag it to the Trash or use ClearX › Uninstall |
 | Build caps at the source | MyDAW's script hardcodes no `-j`. clearx now sets `CMAKE_BUILD_PARALLEL_LEVEL` + `MAKEFLAGS` via `launchctl setenv` with the 4/4/2 cap (no extra LaunchAgent: the daemon re-sets it). **Applied** |

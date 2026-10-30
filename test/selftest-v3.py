@@ -74,7 +74,8 @@ for i in range(4):
 r = st.get("reserve", {})
 say(f"stages over 4 ticks: {stages}; ready {r.get('ready', 0) >> 20} MB, target {r.get('target', 0) >> 20} MB, "
     f"reachable={r.get('reachable')}; Xcode jobs = {st.get('xcode_jobs')}; clang backgrounded = {str(c.pid) in st.get('bg', {})}")
-results["reserve_escalates"] = stages[-1] >= 3 and st.get("xcode_jobs") == 2
+# 15 GB can never be held on 16 GB, so it must stop at stage 2 and leave the build alone (test_tick.py covers a reachable target)
+results["reserve_escalates"] = stages[-1] == 2 and r.get("reachable") is False and str(c.pid) not in st.get("bg", {})
 open(CONF, "w").write(s2.replace("target = 15G", "target = 1G"))
 for i in range(5):
     st = tick(hid_idle_s=lambda: 300)

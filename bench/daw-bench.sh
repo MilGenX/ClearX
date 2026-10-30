@@ -19,17 +19,21 @@ for r in off on; do
     -DFETCHCONTENT_SOURCE_DIR_LINK=$W/deps/link-src -DFETCHCONTENT_SOURCE_DIR_RUBBERBAND=$W/deps/rubberband-src > $W/configure-$r.log
 done
 set +e
-quiet() {  # no other build, CPU at full speed, load settled
+quiet() {  # no other build, CPU at full speed, load settled; after 45 min runs anyway (load_start in the JSON says so)
   echo "$(date +%T) waiting for a quiet machine"
+  local n=0
   until ! pgrep -f "auto-src/build|xcodebuild|ctest --test-dir" >/dev/null && pmset -g therm | grep -q "CPU_Speed_Limit.*= 100" \
-        && [ "$(sysctl -n vm.loadavg | awk '{print int($2)}')" -lt 4 ]; do sleep 15; done
+        && [ "$(sysctl -n vm.loadavg | awk '{print int($2)}')" -lt 4 ]; do
+    n=$((n + 1)); [ $n -ge 180 ] && { echo "$(date +%T) NOT quiet after 45 min, running anyway"; return; }
+    sleep 15
+  done
   sleep 60; echo "$(date +%T) quiet"
 }
 build() { echo "cmake --build $W/build-$1 --config Release -- -quiet ONLY_ACTIVE_ARCH=NO MODULE_CACHE_DIR=$W/build-$1/ModuleCache"; }
 trap 'mg on' EXIT INT TERM     # clearx always ends up back on
 quiet; mg off
-mg bench run mydaw-off --guard-swap 3G --guard-avail 500M -- "$(build off)"
+mg bench run mydaw-off --guard-swap 3G --guard-avail 500M --max-seconds 5400 -- "$(build off)"
 mg on; quiet; mg tick; sleep 11; mg tick
-mg bench run mydaw-on --guard-swap 3G --guard-avail 500M -- "$(build on)"
+mg bench run mydaw-on --guard-swap 3G --guard-avail 500M --max-seconds 5400 -- "$(build on)"
 rm -rf $W
 echo "$(date +%T) done"

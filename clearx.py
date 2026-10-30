@@ -11,7 +11,7 @@ Usage:
   clearx pause <name> | resume all | resume <name>
   clearx pause-pid|resume-pid|bg-pid|fg-pid|quit-pid|throttle-pid|unthrottle-pid <pid>
   clearx bench [seconds]   (CSV snapshot: speed limit, load, swap rate, VRAM, GPU%)
-  clearx bench run <label> [--guard-swap 3G] [--guard-avail 500M] -- <command>   (workload benchmark)
+  clearx bench run <label> [--guard-swap 3G] [--guard-avail 500M] [--max-seconds N] -- <command>   (workload benchmark)
   clearx off | on
   clearx maintain [all|scan|clean <cat,...>|large|startup|disable <label>|enable <label>
                      |uninstall <App> [--vendor com.x] [--apply]|updates|security|health|storage|optimize]
@@ -20,7 +20,7 @@ Usage:
   clearx boost [--json] [--quit "App, App"]   Speed Up: real actions only, measured before/after
   clearx optimize [--apply]   measure every limit of this Mac; --apply sets the safe user-level items
 """
-import configparser, fnmatch, json, os, re, signal, subprocess, sys, time
+import configparser, fnmatch, json, os, re, signal, subprocess, sys, time, types
 
 HOME = os.path.dirname(os.path.realpath(__file__))
 CONF = os.environ.get("CLEARX_CONF", os.path.join(HOME, "clearx.conf"))
@@ -786,27 +786,9 @@ def freeze_tick(conf, st, procs, lvl, fpid, daws, compilers, now, dry, reserve_s
 
 
 # ---------- the tick ----------
-def tick(dry=False, force=None):
-    _rq = os.path.join(os.path.dirname(os.path.abspath(__file__)), "state", "ps.req")
-    if os.path.exists(_rq):  # on-demand process snapshot for remote diagnosis
-        with open(_rq[:-3] + "txt", "w") as f:
-            f.write(sh("ps", "-axro", "pid=,ppid=,%cpu=,rss=,stat=,command=")[:200000])
-        os.rename(_rq, _rq + ".done")
-    _rr = os.path.join(os.path.dirname(_rq), "run.req")  # one-shot maintenance script, only from ./ops/
-    if os.path.exists(_rr):
-        name = os.path.basename(open(_rr).read().strip())
-        os.rename(_rr, _rr + ".done")
-        script = os.path.join(os.path.dirname(os.path.dirname(_rr)), "ops", name)
-        if name and os.path.isfile(script):
-            with open(_rr[:-3] + "out", "w") as f:  # detached: never blocks the tick
-                subprocess.Popen(["/usr/sbin/taskpolicy", "-b", "/usr/bin/perl", "-e", "alarm 900; exec @ARGV", "/bin/zsh", script],
-                                 stdin=subprocess.DEVNULL, stdout=f, stderr=subprocess.STDOUT, start_new_session=True)
-    conf = load_conf()
-    st = load_state()
-    dry = dry or conf.getboolean("general", "dry_run", fallback=False)
-    if os.path.exists(OFF_FILE):
-        return
-    now = time.time()
+def _read_pool(c):
+    """Reads the machine and works out this tick's pool level."""
+    conf, st, now, force = c.conf, c.st, c.now, c.force
     m = metrics()
     g = gpu_full()
     last_out = st.get("swapouts", m["swapouts"])
@@ -829,7 +811,12 @@ def tick(dry=False, force=None):
     pool["state"] = level
     lvl = LEVELS.index(level)
     L, P = conf["levels"], (conf["pool"] if conf.has_section("pool") else {})
+    c.m = m; c.g = g; c.swapping_mb = swapping_mb; c.pool = pool; c.level = level; c.lvl = lvl; c.L = L; c.P = P
 
+
+def _read_procs(c):
+    """Process list, mode, and who's in front (never touched)."""
+    conf, st, now, dry, pool, lvl, P = c.conf, c.st, c.now, c.dry, c.pool, c.lvl, c.P
     procs = proc_list()
     compilers = globs(conf.get("build_guard", "compilers", fallback=""))
     build_tools = globs(conf.get("modes", "build_tools", fallback=""))
@@ -863,7 +850,12 @@ def tick(dry=False, force=None):
     if fpid in procs:
         st.setdefault("front_seen", {})[procs[fpid]["name"]] = now
     is_build = lambda p: matches(p["name"], compilers) or matches(p["name"], build_tools)
+    c.procs = procs; c.compilers = compilers; c.mode = mode; c.fpid = fpid; c.fg = fg; c.is_build = is_build
 
+
+def _note_level(c):
+    """Logs level changes and the periodic heartbeat."""
+    conf, st, now, m, g, swapping_mb, pool, level, lvl, mode = c.conf, c.st, c.now, c.m, c.g, c.swapping_mb, c.pool, c.level, c.lvl, c.mode
     summary = (f"pool={level} mode={mode} swap={m['swap'] >> 20}M free={m['free'] >> 20}M avail={m['avail'] >> 20}M "
                f"pressure={m['pressure']} swapout={swapping_mb:.0f}MB/tick vram={pool['vram_pct']:.0f}% "
                f"spill={pool['spill_rate']}MB/s speed={pool['thermal']}% disk={pool['disk_free'] >> 30}G/"
@@ -879,6 +871,10 @@ def tick(dry=False, force=None):
         st["heartbeat"] = now
     st["level"] = level
 
+
+def _drop_exited(c):
+    """Forgets processes that exited; WebKit helpers are never left paused."""
+    st, now, procs = c.st, c.now, c.procs
     for k in list(st.get("paused", {})):
         if int(k) not in procs:
             st["paused"].pop(k)
@@ -891,6 +887,10 @@ def tick(dry=False, force=None):
             st["bg"].pop(k)
     st["cooldown"] = {k: v for k, v in st.get("cooldown", {}).items() if v > now}
 
+
+def _release_overdue(c):
+    """Time limits on every kind of pause."""
+    conf, st, now, dry = c.conf, c.st, c.now, c.dry
     # max-pause safety net: nothing stays frozen forever
     max_s = conf.getfloat("resume", "max_pause_min", fallback=15) * 60
     bmax_s = conf.getfloat("build_guard", "max_pause_min", fallback=60) * 60
@@ -917,6 +917,11 @@ def tick(dry=False, force=None):
             else:  # (frozen apps: one notification per renderer would be a pile of them)
                 notify("Resumed after timeout", f"{info['name']} (pid {k}) was paused {int((now - info['t']) / 60)} min")
 
+
+def _reserve_and_freeze(c):
+    """Works out the reserve stage, then runs the App Freezer."""
+    conf, st, now, dry, m, procs, compilers, fg, is_build, lvl, fpid = c.conf, c.st, c.now, c.dry, c.m, c.procs, c.compilers, c.fg, c.is_build, c.lvl, c.fpid
+    hist = st["hist"]
     # RAM reserve: keep `target` GB ready to use (free + file cache). Below it, one more step per tick:
     # 1 freeze hidden browser tabs' renderers + idle hidden apps (oldest/largest), 2 more of those even when the
     # pool is green, 3 builds to 2 jobs at background QoS, 4 also freeze hidden apps idle >= recent_min.
@@ -952,6 +957,12 @@ def tick(dry=False, force=None):
         st.pop("reserve", None); st["reserve_stage"] = 0
     st["frozen_new"] = freeze_tick(conf, st, procs, lvl, fpid, globs(conf.get("modes", "studio_apps", fallback="")),
                                    compilers, now, dry, stage)
+    c.stage = stage
+
+
+def _classify(c):
+    """Sorts processes into who may be lowered and who may be paused."""
+    conf, st, procs, fg, is_build = c.conf, c.st, c.procs, c.fg, c.is_build
     elig = [p for p in eligible(procs, conf, st) if p["pid"] not in fg]
     bgc = [p for p in elig if not is_build(p)]          # the background class
     # apps you can see (and their helpers: tab renderers, WebKit/GPU processes) are never paused for pressure: a
@@ -962,7 +973,12 @@ def tick(dry=False, force=None):
     pausable = [p for p in bgc if p["pid"] not in gui and not p["path"].startswith(("/System/", "/usr/", "/Library/Apple/"))]
     gpu_heavy = globs(conf.get("vram", "gpu_heavy", fallback=""))
     acts = []
+    c.elig = elig; c.bgc = bgc; c.gui = gui; c.pausable = pausable; c.gpu_heavy = gpu_heavy; c.acts = acts
 
+
+def _gpu_spill(c):
+    """GPU memory spilling into RAM under pressure."""
+    st, now, dry, pool, level, lvl, P, bgc, gpu_heavy, acts = c.st, c.now, c.dry, c.pool, c.level, c.lvl, c.P, c.bgc, c.gpu_heavy, c.acts
     # 1. GPU spilling into RAM while RAM is under pressure: background the GPU-heavy background apps
     #    first; compilers get a grace period before the build guard tightens
     if pool["spilling"] and lvl >= 1:
@@ -971,7 +987,12 @@ def tick(dry=False, force=None):
                 acts.append("spill")
         st["spill_t"] = now
     spill_grace = now - st.get("spill_t", 0) < float(P.get("spill_grace_s", 20))
+    c.spill_grace = spill_grace
 
+
+def _thermal(c):
+    """macOS is lowering the CPU speed limit."""
+    conf, st, now, dry, pool, P, bgc, gpu_heavy = c.conf, c.st, c.now, c.dry, c.pool, c.P, c.bgc, c.gpu_heavy
     # 2. thermal throttling: cut compiler parallelism first, then background the UI apps if it persists
     spd = pool["thermal"]
     if spd < 100:
@@ -997,7 +1018,12 @@ def tick(dry=False, force=None):
         st["thermal_notified"] = now
         notify("Your Mac got warm", "ClearX eased off background work (fewer build jobs, background apps "
                                     "at low priority) until it cools down.")
+    c.spd = spd
 
+
+def _heat(c):
+    """Sustained CPU load, before macOS starts throttling."""
+    conf, st, now, dry, pool, spd, bgc, elig = c.conf, c.st, c.now, c.dry, c.pool, c.spd, c.bgc, c.elig
     # 2b. heat: the i9 runs hot under sustained all-core load long before macOS lowers CPU_Speed_Limit, so act
     #     on sustained load: fewer compile jobs for the next build, background QoS for known background hogs.
     #     Between cool_pct and hot_pct neither timer runs (hysteresis); released after cool_s below cool_pct.
@@ -1034,18 +1060,10 @@ def tick(dry=False, force=None):
                         renice(p, dry, f"heat: auto-builder, CPU load {cpu}%")
                     background(p, st, dry, f"heat: auto-builder, CPU load {cpu}%")
 
-    # Xcode parallelism for the next build follows the pool: 8 healthy, 4 yellow, 2 orange+/throttling
-    J = lambda k, d: int(P.get(k, d))
-    want = J("jobs_pressure", 2) if (lvl >= 2 or spd < 100) else J("jobs_normal", 4) if lvl == 1 \
-        else J("jobs_healthy", 8)
-    if st.get("heat_on"):
-        want = min(want, int(Hc.get("jobs", 6)))
-    if stage >= 3:  # reserve: builds give way (2 jobs, background QoS)
-        want = min(want, 2)
-        for p in procs.values():
-            if matches(p["name"], compilers) and p["pid"] not in fg and "T" not in p["stat"]:
-                background(p, st, dry, "interactive: RAM reserve")
-    queue_tick(conf, st, procs, fg, dry)
+
+def _interactive(c, want):
+    """While you're using the Mac, builds and local AI step back. Returns the next build's job cap."""
+    conf, st, now, dry, procs, compilers, fg, fpid, stage = c.conf, c.st, c.now, c.dry, c.procs, c.compilers, c.fg, c.fpid, c.stage
     I = conf["interactive"] if conf.has_section("interactive") else {}
     interactive = str(I.get("enabled", "false")).lower() == "true"
     if interactive:
@@ -1095,9 +1113,30 @@ def tick(dry=False, force=None):
             for k, info in sorted(st.get("paused", {}).items(), key=lambda kv: -int(kv[0])):  # children first
                 if info.get("kind") == "hold":
                     resume(int(k), st, "you're away: auto-builder runs", dry=dry)
-            for k, info in list(st.get("bg", {}).items()):
-                if info.get("why", "").startswith("interactive"):
+            for k, info in list(st.get("bg", {}).items()):  # (the reserve's own holds stay until the reserve is met)
+                if info.get("why", "").startswith("interactive") and not (stage >= 3 and "RAM reserve" in info["why"]):
                     unbackground(int(k), st, "you're away: full speed", dry=dry)
+    c.interactive = interactive
+    return want
+
+
+def _build_jobs(c):
+    """How many compile jobs the next build gets; also runs the build queue."""
+    conf, st, now, dry, procs, compilers, fg, level, lvl, P, spd, stage = c.conf, c.st, c.now, c.dry, c.procs, c.compilers, c.fg, c.level, c.lvl, c.P, c.spd, c.stage
+    Hc = conf["heat"] if conf.has_section("heat") else {}
+    # Xcode parallelism for the next build follows the pool: 8 healthy, 4 yellow, 2 orange+/throttling
+    J = lambda k, d: int(P.get(k, d))
+    want = J("jobs_pressure", 2) if (lvl >= 2 or spd < 100) else J("jobs_normal", 4) if lvl == 1 \
+        else J("jobs_healthy", 8)
+    if st.get("heat_on"):
+        want = min(want, int(Hc.get("jobs", 6)))
+    if stage >= 3:  # reserve: builds give way (2 jobs, background QoS)
+        want = min(want, 2)
+        for p in procs.values():
+            if matches(p["name"], compilers) and p["pid"] not in fg and "T" not in p["stat"]:
+                background(p, st, dry, "interactive: RAM reserve")
+    queue_tick(conf, st, procs, fg, dry)
+    want = _interactive(c, want)
     cur = st.get("xcode_jobs")
     if cur is None or want <= cur:
         st["jobs_low_t"] = now
@@ -1105,12 +1144,20 @@ def tick(dry=False, force=None):
         want = cur  # raise only once the higher value has been wanted for 60 s straight
     set_xcode_jobs(want, st, dry, f"pool {level}, speed {spd}%")
 
+
+def _mode_priorities(c):
+    """Studio and build modes lower the apps competing with them."""
+    conf, st, dry, mode, lvl, bgc = c.conf, c.st, c.dry, c.mode, c.lvl, c.bgc
     # mode: studio always keeps the DAW's competition backgrounded; build mode only when the pool needs it
     if mode == "studio" or (mode == "build" and lvl >= 1):
         for p in bgc:
             if matches(p["name"], globs(mode_cfg(conf, mode, "background", ""))):
                 background(p, st, dry, f"mode {mode}")
 
+
+def _budgets(c):
+    """Soft per-app memory budgets."""
+    conf, st, now, dry, mode, pool, level, lvl, bgc, gui = c.conf, c.st, c.now, c.dry, c.mode, c.pool, c.level, c.lvl, c.bgc, c.gui
     # 3. soft per-app budgets: act only when the pool is yellow+ (or the disk is tight)
     scale = float(mode_cfg(conf, mode, "budget_scale", "1"))
     for pat, lim in conf.items("budgets"):
@@ -1131,7 +1178,12 @@ def tick(dry=False, force=None):
                     bgc = [p for p in bgc if p["pid"] != top["pid"]]
         else:
             st.setdefault("over", {}).pop(key, None)
+    c.bgc = bgc
 
+
+def _pressure(c):
+    """Lowers and pauses background processes according to the level."""
+    conf, st, dry, procs, level, lvl, L, P, bgc, gui, pausable = c.conf, c.st, c.dry, c.procs, c.level, c.lvl, c.L, c.P, c.bgc, c.gui, c.pausable
     # 4. pressure on the background class (largest first), never the foreground app or the build
     if lvl >= 1:
         heavy = globs(conf.get("heavy", "names", fallback=""))
@@ -1154,6 +1206,10 @@ def tick(dry=False, force=None):
                 ("/System/", "/usr/", "/Library/Apple/"))):
             resume(int(k), st, "app on screen or macOS service: never paused for pressure", dry=dry)
 
+
+def _build_guard(c):
+    """Caps total compiler memory and job count. The oldest job always runs."""
+    conf, st, dry, compilers, mode, lvl, P, elig, spd, spill_grace, stage = c.conf, c.st, c.dry, c.compilers, c.mode, c.lvl, c.P, c.elig, c.spd, c.spill_grace, c.stage
     # compilers paused for pressure (by older versions, or by hand-off) belong to the build guard
     for k, info in st.get("paused", {}).items():
         if info.get("kind") != "build" and matches(info["name"], compilers) and info.get("why") != "manual":
@@ -1165,7 +1221,7 @@ def tick(dry=False, force=None):
         budget = size(mode_cfg(conf, mode, "compiler_budget", conf.get("build_guard", "budget", fallback="6G")))
         if not spill_grace:
             budget = int(budget * {0: 1, 1: 1, 2: 0.5, 3: 0.25}[lvl])
-        max_jobs = J("thermal_jobs", 4) if spd < 100 else 10 ** 6
+        max_jobs = int(P.get("thermal_jobs", 4)) if spd < 100 else 10 ** 6
         if stage >= 3:
             max_jobs = min(max_jobs, 2)
         running = [p for p in elig if matches(p["name"], compilers) and "T" not in p["stat"]]
@@ -1190,6 +1246,10 @@ def tick(dry=False, force=None):
                 break
         st["compilers_mem"], st["compilers_budget"] = total, budget
 
+
+def _release_healthy(c):
+    """Resumes and un-backgrounds once the pool has been steadily healthy."""
+    conf, st, now, dry, force, m, swapping_mb, lvl, spd, interactive = c.conf, c.st, c.now, c.dry, c.force, c.m, c.swapping_mb, c.lvl, c.spd, c.interactive
     # 6. healthy pool: release everything (resume one per tick, smallest first; un-background after 60 s calm)
     R = conf["resume"]
     calm = m["pressure"] == 1 and swapping_mb < 1 and m["avail"] >= size(R["resume_free"])
@@ -1213,6 +1273,10 @@ def tick(dry=False, force=None):
                     unbackground(int(k), st, "pool healthy", dry=dry)
             st["over"] = {}
 
+
+def _cpu_governor(c):
+    """Sustained hot background processes: background QoS, then duty-cycling."""
+    conf, st, now, dry, procs, fg, bgc = c.conf, c.st, c.now, c.dry, c.procs, c.fg, c.bgc
     # CPU governor: sustained hot background processes -> background QoS, then duty-cycle; release when calm
     C = conf["cpu"] if conf.has_section("cpu") else {}
     if C.get("enabled", "true").lower() == "true":
@@ -1254,6 +1318,10 @@ def tick(dry=False, force=None):
                     and pr and pr["cpu"] < release:
                 unbackground(int(k), st, "cpu calmed down", dry=dry)
 
+
+def _finish(c):
+    """Final bookkeeping for the app, the health score and state.json."""
+    st, now, dry, fg, g, pool, spd, acts = c.st, c.now, c.dry, c.fg, c.g, c.pool, c.spd, c.acts
     # the app the user switched to is never left backgrounded by an automatic action
     for k, info in list(st.get("bg", {}).items()):
         if int(k) in fg and info.get("why", "") != "manual":
@@ -1280,6 +1348,19 @@ def tick(dry=False, force=None):
         except Exception as e:  # health is informational; never break the tick
             log(f"health error: {e}")
     save_state(st)
+
+
+def tick(dry=False, force=None):
+    conf = load_conf()
+    st = load_state()
+    dry = dry or conf.getboolean("general", "dry_run", fallback=False)
+    if os.path.exists(OFF_FILE):
+        return
+    c = types.SimpleNamespace(conf=conf, st=st, dry=dry, force=force, now=time.time())
+    for step in (_read_pool, _read_procs, _note_level, _drop_exited, _release_overdue, _reserve_and_freeze, _classify,
+                 _gpu_spill, _thermal, _heat, _build_jobs, _mode_priorities, _budgets, _pressure, _build_guard,
+                 _release_healthy, _cpu_governor, _finish):  # order matters: each step sees what the last one did
+        step(c)
 
 
 # ---------- junk report (read-only) ----------
@@ -1336,10 +1417,12 @@ def bench(seconds=60, step=2):
     return 0
 
 
-def bench_run(label, cmd, guard_swap=None, guard_avail=None, step=2, logfile=None):
+def bench_run(label, cmd, guard_swap=None, guard_avail=None, step=2, logfile=None, max_s=None):
     """Runs cmd (shell) as its own process group and samples the machine every `step` s until it exits.
     guard_*: abort (SIGINT, then SIGTERM; never SIGKILL) if swap grows by more than guard_swap over the start,
-    or available memory (free + inactive + purgeable) drops below guard_avail. Writes CSV + JSON in bench/."""
+    or available memory (free + inactive + purgeable) drops below guard_avail; max_s: the same after that long.
+    Each sample also times what you'd feel: starting a tiny program, waking from a short sleep and a small synced
+    disk write (spawn_ms, wake_ms, fsync_ms). Writes CSV + JSON in bench/."""
     os.makedirs(os.path.join(HOME, "bench"), exist_ok=True)
     base = os.path.join(HOME, "bench", time.strftime("run-%Y%m%d-%H%M%S-") + label)
     m0 = metrics()
@@ -1347,16 +1430,28 @@ def bench_run(label, cmd, guard_swap=None, guard_avail=None, step=2, logfile=Non
     r = dict(label=label, cmd=cmd, clearx="off" if os.path.exists(OFF_FILE) else "on", start=time.time(),
              swap_start=m0["swap"], peak_swap=m0["swap"], min_free=m0["free"], min_avail=m0["avail"],
              min_speed=100, max_pressure=m0["pressure"], peak_compressed=m0["compressed"], max_load=0,
+             load_start=loadavg()[1], peak_paused=0,
              peak_vram=0, peak_spill=0, aborted=None, xcode_jobs=subprocess.run(
                  ["defaults", "read", "com.apple.dt.Xcode", "IDEBuildOperationMaxNumberOfConcurrentCompileTasks"],
                  capture_output=True, text=True).stdout.strip() or "default (= CPU count)")
     out = open(logfile or base + ".log", "w")
     proc = subprocess.Popen(cmd, shell=True, stdout=out, stderr=subprocess.STDOUT, start_new_session=True)
     last, t_abort = m0["swapouts"], None
+    feel = dict(spawn_ms=[], wake_ms=[], fsync_ms=[])
     with open(base + ".csv", "w") as f:
-        f.write("t,swap_mb,swapout_mb_s,free_mb,avail_mb,compressed_mb,pressure,speed_limit,load1,vram_mb,spill_mb,paused\n")
+        f.write("t,swap_mb,swapout_mb_s,free_mb,avail_mb,compressed_mb,pressure,speed_limit,load1,vram_mb,spill_mb,paused,"
+                "spawn_ms,wake_ms,fsync_ms\n")
         while proc.poll() is None:
             t0 = time.time()
+            subprocess.run(["/usr/bin/true"])
+            spawn = (time.time() - t0) * 1000
+            t1 = time.time()
+            time.sleep(0.05)
+            wake = max(0, (time.time() - t1 - 0.05) * 1000)
+            sync = disk_probe()[1] or 0
+            feel["spawn_ms"].append(spawn); feel["wake_ms"].append(wake); feel["fsync_ms"].append(sync)
+            paused = len(load_state().get("paused", {}))
+            r["peak_paused"] = max(r["peak_paused"], paused)
             m, (spd, _), g, ld = metrics(), thermal(), gpu_full() or dict(used=0, sys=0), loadavg()[0]
             rate_ = max(0, m["swapouts"] - last) * PAGE / (1 << 20) / step
             last = m["swapouts"]
@@ -1367,11 +1462,13 @@ def bench_run(label, cmd, guard_swap=None, guard_avail=None, step=2, logfile=Non
             r["peak_vram"] = max(r["peak_vram"], g["used"]); r["peak_spill"] = max(r["peak_spill"], g["sys"])
             f.write(",".join(map(str, [round(t0 - r["start"]), m["swap"] >> 20, round(rate_, 1), m["free"] >> 20,
                                        m["avail"] >> 20, m["compressed"] >> 20, m["pressure"], spd, ld,
-                                       g["used"] >> 20, g["sys"] >> 20, len(load_state().get("paused", {}))])) + "\n")
+                                       g["used"] >> 20, g["sys"] >> 20, paused, round(spawn, 1), round(wake, 1), round(sync, 1)])) + "\n")
             f.flush()
+            over_time = max_s and t0 - r["start"] > max_s
             if not r["aborted"] and ((guard_swap and m["swap"] - m0["swap"] > guard_swap) or
-                                     (guard_avail and m["avail"] < guard_avail)):
-                r["aborted"] = (f"swap +{(m['swap'] - m0['swap']) >> 20} MB" if guard_swap and m["swap"] - m0["swap"] > guard_swap
+                                     (guard_avail and m["avail"] < guard_avail) or over_time):
+                r["aborted"] = ("time limit" if over_time else
+                                f"swap +{(m['swap'] - m0['swap']) >> 20} MB" if guard_swap and m["swap"] - m0["swap"] > guard_swap
                                 else f"available memory {m['avail'] >> 20} MB") + f" at {round(t0 - r['start'])} s"
                 log(f"BENCH {label}: safety abort ({r['aborted']})")
                 os.killpg(proc.pid, signal.SIGCONT); os.killpg(proc.pid, signal.SIGINT); t_abort = time.time()
@@ -1382,6 +1479,9 @@ def bench_run(label, cmd, guard_swap=None, guard_avail=None, step=2, logfile=Non
     r.update(end=time.time(), seconds=round(time.time() - r["start"]), rc=proc.returncode,
              swapout_mb=round((m1["swapouts"] - m0["swapouts"]) * PAGE / (1 << 20)), swap_end=m1["swap"],
              ssd_written_mb=round((ssd_counters()[0] - w0) / (1 << 20)))
+    for k, v in feel.items():
+        v = sorted(v) or [0]
+        r[k] = dict(median=round(v[len(v) // 2], 1), p95=round(v[int(len(v) * .95)], 1), max=round(v[-1], 1))
     with open(base + ".json", "w") as f:
         json.dump(r, f, indent=1)
     print(json.dumps(r, indent=1))
@@ -1866,7 +1966,7 @@ def main(argv):
         a = argv[3:]
         cmd_ = " ".join(a[a.index("--") + 1:]) if "--" in a else ""
         opt = lambda k: size(a[a.index(k) + 1]) if k in a else None
-        r = bench_run(a[0], cmd_, opt("--guard-swap"), opt("--guard-avail"))
+        r = bench_run(a[0], cmd_, opt("--guard-swap"), opt("--guard-avail"), max_s=int(dict(zip(a, a[1:])).get("--max-seconds", 0)) or None)
         return 0 if r["rc"] == 0 else 1
     elif cmd == "bench":
         return bench(int(argv[2]) if len(argv) > 2 else 60)

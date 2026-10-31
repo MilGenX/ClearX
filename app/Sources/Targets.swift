@@ -2,7 +2,7 @@
 import SwiftUI
 import AppKit
 
-/// "Reserve: 10 GB ✓" in the menu, from the daemon's state.json.
+/// "Reserve: 3 GB ✓" in the menu, from the daemon's state.json.
 struct ReserveRow: View {
     @ObservedObject var m: Model
     var body: some View {

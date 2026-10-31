@@ -19,7 +19,7 @@ in **bursts**: 6.1 GB out and 4.8 GB in, almost all in two 1-minute spikes. Quie
 | 5 | **CPU heat throttling** (i9-9900K in an iMac) | `CPU_Speed_Limit` down to **74 %** in 7 of 90 samples, all when load hit 15–37 (builder + AI at once) | Everything ~25 % slower during those bursts | Less parallel work while you're active (#1, #2) | min 74 % → **100 %** in the after window |
 | 6 | **Computer sleep after 1 minute** | `pmset sleep 1` | Builds, downloads and the AI paused or interrupted; wake-up delays | **Fixed** with your password: `sleep 0` (the screen still sleeps on its own setting) | 1 min → never |
 | 7 | **ClearX's own cost** | Normal tick 0.37 s of CPU every 10 s (~4 % of one core); every 5 min a 1.7 s bookkeeping tick | Small | Acceptable; noted for a later optimization | — |
-| 8 | Spotlight | mds + mds_stores + mdworker ≈ 6 % of a core; MYAPP, XDAW and the Trash are **not** indexed (checked) | Minor | Nothing needed | — |
+| 8 | Spotlight | mds + mds_stores + mdworker ≈ 6 % of a core; MYAPP, MyDAW and the Trash are **not** indexed (checked) | Minor | Nothing needed | — |
 | — | Not causes (checked) | Graphics: GPU avg 3 %, WindowServer ~5 %, native 5K "default" scaling, Reduce Transparency **on** (ClearX's page wrongly said off: fixed). App launch: TextEdit 0.12 s, Safari 1.8 s cold / 0.13 s warm. No hang or spin reports today. Time Machine not running. Disk fsync latency 0.3–2.7 ms. | | | |
 
 ## What you'll feel
@@ -58,8 +58,8 @@ this window, and Brave was open. 35–39 % is still in macOS's normal range (no 
 or red pool state occurred). It is the one metric that didn't improve, so it's reported as is.
 
 ### Still slow, ranked
-1. **MyDAW's auto-update build and tests.** clang used 26 % of a core on average; XDAW's test programs wrote 0.35 GB.
-   The only swap burst of the window (0.9 GB in one minute at 03:22) lines up with it. Proposal for XDAW (another
+1. **MyDAW's auto-update build and tests.** clang used 26 % of a core on average; MyDAW's test programs wrote 0.35 GB.
+   The only swap burst of the window (0.9 GB in one minute at 03:22) lines up with it. Proposal for MyDAW (another
    thread, not edited here): run its builder only when you're idle, like MyApp b801.
 2. **16 GB with everything open.** Ready memory dips to 3.6 GB with Brave, Claude, MyApp and an MyDAW build at once. That's
    the hardware ceiling; software decides who waits.

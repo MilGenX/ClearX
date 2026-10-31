@@ -756,7 +756,7 @@ def optimize(storage_info=None, apply=False, log=print):
     cc = shutil.which("ccache") or os.path.exists("/usr/local/bin/ccache")
     add("Dev", "ccache for the MyDAW build", ("installed" if cc else "not set up") + ": skipped on purpose, MyDAW would "
         "have to switch build systems (Xcode to Ninja) and that's not worth the risk now", "ok" if cc else "info",
-        "brew install ccache; then in XDAW's build script: cmake -G Ninja -DCMAKE_C_COMPILER_LAUNCHER=ccache "
+        "brew install ccache; then in MyDAW's build script: cmake -G Ninja -DCMAKE_C_COMPILER_LAUNCHER=ccache "
         "-DCMAKE_CXX_COMPILER_LAUNCHER=ccache (the Xcode generator ignores compiler launchers)",
         "a rebuild after a pull recompiles only what changed: typically minutes become seconds for JUCE")
     try:

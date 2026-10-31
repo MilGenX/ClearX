@@ -514,7 +514,7 @@ def build_roots(procs, conf):
     return roots
 
 
-def queue_tick(conf, st, procs, fg, dry):
+def queue_tick(conf, st, procs, fg, dry, strained=True):
     Q = conf["queue"] if conf.has_section("queue") else {}
     if str(Q.get("enabled", "true")).lower() != "true":
         for k, i in list(st.get("paused", {}).items()):
@@ -538,6 +538,8 @@ def queue_tick(conf, st, procs, fg, dry):
     # the head of the line runs; so does anything you run in the app in front (Xcode, Terminal you're watching)
     active = [r for r in order if groups[r] & fg] or []
     active = set(active + order[:1])
+    if not strained:  # memory to spare: builds run side by side, as they would without ClearX
+        active = set(order)
     # MyDAW's updater testing (its ctest, under a build that skips the line): its timing tests miss beside another
     # build (X 2026-10-28: MyApp's tests next to MyDAW's player test failed it twice), so every other build waits meanwhile.
     skipped = queue_skipped(procs, conf)
@@ -935,14 +937,14 @@ def _reserve_and_freeze(c):
     RS = conf["reserve"] if conf.has_section("reserve") else {}
     stage = 0
     if str(RS.get("enabled", "false")).lower() == "true":
-        target = size(RS.get("target", "10G"))
+        target = size(RS.get("target", "3G"))
         ready = m["free"] + m["cached"]
         need = sum(procs[x]["mem"] for x in fg) + sum(p["mem"] for p in procs.values()
                                                        if matches(p["name"], compilers) and p["pid"] not in fg)
         ceiling = int(sh("sysctl", "-n", "hw.memsize").strip()) - m["wired"] - m["compressed"] - need
         # which build holds the reserve down (the menu says so calmly instead of a red cross)
         builds = [p for p in procs.values() if is_build(p)]
-        build = "" if not builds else "Building MyDAW" if any("/XDAW/" in p["path"] or "/XDAW/" in cmdline(p["pid"])
+        build = "" if not builds else "Building MyDAW" if any("/MyDAW/" in p["path"] or "/MyDAW/" in cmdline(p["pid"])
                                                            for p in builds[:6]) \
             else "Building MyApp" if any("/MYAPP/" in p["path"] or "/MYAPP/" in cmdline(p["pid"]) for p in builds[:6]) \
             else "A build is running"
@@ -1026,6 +1028,9 @@ def _thermal(c):
         notify("Your Mac got warm", "ClearX eased off background work (fewer build jobs, background apps "
                                     "at low priority) until it cools down.")
     c.spd = spd
+    # ClearX only slows something down when the Mac is short of memory or macOS is already lowering the CPU speed;
+    # otherwise builds, AI servers and busy apps run exactly as they would without it
+    c.strained = c.lvl >= 1 or c.stage >= 1 or spd < 100
 
 
 def _heat(c):
@@ -1061,7 +1066,7 @@ def _heat(c):
             # automatic builders/test runners (e.g. a node --test run spawning one worker per core): their workers
             # live seconds, so lower the long-lived parents too; nice and background QoS carry over to new children
             bp = globs(conf.get("interactive", "build_paths", fallback="/auto-src/, /.worktrees/builder/"))
-            for p in elig:
+            for p in elig if spd < 100 else []:
                 if any(x in p["path"] for x in bp) and "T" not in p["stat"]:
                     if p["nice"] < 10:
                         renice(p, dry, f"heat: auto-builder, CPU load {cpu}%")
@@ -1076,7 +1081,7 @@ def _interactive(c, want):
     if interactive:
         idle = hid_idle_s()
         st["hid_idle"] = round(idle)
-        if idle < float(I.get("active_s", 60)):  # you're using the Mac: builds yield to you
+        if idle < float(I.get("active_s", 60)) and c.strained:  # you're using a strained Mac: builds yield to you
             want = min(want, int(I.get("active_jobs", 4)))
             if stage >= 1:  # reserve short while you work: the next build step gets 1 job (never SIGSTOP: a
                 want = 1    # stopped compiler keeps its RAM and it gets swapped out, i.e. SSD writes)
@@ -1116,7 +1121,7 @@ def _interactive(c, want):
                         unbackground(p["pid"], st, "its app is in front", dry=dry)
                 else:
                     background(p, st, dry, "interactive: AI server while you use another app")
-        elif idle >= float(I.get("idle_s", 120)):
+        elif idle >= float(I.get("idle_s", 120)) or not c.strained:
             for k, info in sorted(st.get("paused", {}).items(), key=lambda kv: -int(kv[0])):  # children first
                 if info.get("kind") == "hold":
                     resume(int(k), st, "you're away: auto-builder runs", dry=dry)
@@ -1142,7 +1147,7 @@ def _build_jobs(c):
         for p in procs.values():
             if matches(p["name"], compilers) and p["pid"] not in fg and "T" not in p["stat"]:
                 background(p, st, dry, "interactive: RAM reserve")
-    queue_tick(conf, st, procs, fg, dry)
+    queue_tick(conf, st, procs, fg, dry, c.strained)
     want = _interactive(c, want)
     cur = st.get("xcode_jobs")
     if cur is None or want <= cur:
@@ -1294,7 +1299,7 @@ def _cpu_governor(c):
         watch = globs(C.get("watch", ""))
         for p in bgc:
             k = str(p["pid"])
-            if p["cpu"] >= limit:
+            if p["cpu"] >= limit and c.strained:
                 first = hot.setdefault(k, now)
                 if now - first >= sustain:
                     if k not in st.get("bg", {}):
@@ -1314,7 +1319,7 @@ def _cpu_governor(c):
         for k, info in list(st.get("throttled", {}).items()):
             pr = procs.get(int(k))
             # while duty-cycled, ps %cpu reads ~duty*real, so compare against release*duty
-            if pr is None or pr["cpu"] < release * info.get("duty", 1) or int(k) in fg:
+            if pr is None or pr["cpu"] < release * info.get("duty", 1) or int(k) in fg or not c.strained:
                 stop_throttle(int(k), st, "cpu calmed down" if pr and int(k) not in fg else
                               "now in the foreground" if pr else "exited")
                 hot.pop(k, None)
@@ -1323,7 +1328,7 @@ def _cpu_governor(c):
         for k, info in list(st.get("bg", {}).items()):
             pr = procs.get(int(k))
             if info["why"].startswith("cpu") and k not in st.get("throttled", {}) and k not in hot \
-                    and pr and pr["cpu"] < release:
+                    and pr and (pr["cpu"] < release or not c.strained):
                 unbackground(int(k), st, "cpu calmed down", dry=dry)
 
 

@@ -63,8 +63,16 @@ class Tick(unittest.TestCase):
         fm.mem.update(pressure=1, avail=6 * GB)
         self.assertEqual([fm.tick(cx)["level"] for _ in range(3)], ["orange", "yellow", "green"])
 
+    def test_cpu_governor_leaves_busy_apps_alone_when_the_mac_is_fine(self):
+        fm = machine()
+        fm.procs[SPINNER]["cpu"] = 500.0
+        for _ in range(8):
+            fm.tick(cx)
+        self.assertNotIn(str(SPINNER), fm.state.get("bg", {}))
+
     def test_cpu_governor_lowers_then_releases(self):
         fm = machine()
+        fm.speed = 90  # macOS is lowering the CPU speed
         fm.procs[SPINNER]["cpu"] = 500.0
         for _ in range(8):
             fm.tick(cx)
@@ -76,7 +84,7 @@ class Tick(unittest.TestCase):
     def test_reserve_escalates_when_reachable_and_builds_give_way(self):
         fm = machine()
         fm.procs[60] = proc(60, "clang", 300 * MB, path="/opt/clang")
-        fm.mem.update(free=GB, cached=2 * GB)
+        fm.mem.update(free=GB // 2, cached=GB)
         stages = [fm.tick(cx)["reserve_stage"] for _ in range(5)]
         self.assertEqual(stages, [1, 2, 3, 4, 4])
         self.assertEqual(fm.state["xcode_jobs"], 2)
@@ -84,15 +92,16 @@ class Tick(unittest.TestCase):
 
     def test_reserve_stops_at_stage_2_when_out_of_reach(self):
         fm = machine()
-        fm.procs[FRONT]["mem"] = 9 * GB  # what you're using leaves less than the 10 GB target
-        fm.mem.update(free=GB, cached=2 * GB)
+        fm.procs[FRONT]["mem"] = 11 * GB  # what you're using leaves less than the 3 GB target
+        fm.mem.update(free=GB // 2, cached=GB)
         stages = [fm.tick(cx)["reserve_stage"] for _ in range(4)]
         self.assertEqual(stages, [1, 2, 2, 2])
         self.assertFalse(fm.state["reserve"]["reachable"])
 
     def queue(self):
-        """Two builds: 70 runs (older), 80 waits with a compile job (81) under it."""
+        """Two builds on a strained Mac: 70 runs (older), 80 waits with a compile job (81) under it."""
         fm = machine()
+        fm.speed = 90
         fm.procs[70] = proc(70, "make", 10 * MB, path="/usr/bin/make")
         fm.procs[80] = proc(80, "make", 10 * MB, path="/usr/bin/make")
         fm.procs[81] = proc(81, "clang", 300 * MB, ppid=80, path="/opt/clang")
@@ -121,6 +130,14 @@ class Tick(unittest.TestCase):
         fm.tick(cx)
         self.assertEqual((fm.procs[80]["stat"], fm.procs[81]["stat"]), ("T", "T"))
         self.assertTrue(any("woken from outside" in l for l in fm.logs))
+
+    def test_builds_run_side_by_side_when_the_mac_is_fine(self):
+        fm = self.queue()
+        fm.speed = 100
+        for _ in range(3):
+            fm.tick(cx)
+        self.assertEqual(self.signals(fm, STOP), set())
+        self.assertTrue(all(q["running"] for q in fm.state["build_queue"]))
 
     def test_queue_lets_a_build_through_after_max_wait(self):
         fm = self.queue()

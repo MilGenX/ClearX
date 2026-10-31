@@ -41,11 +41,11 @@ Only you can fix: (1) finish the macOS 15.8.2 + Safari 27.2 install and restart 
 - Speed (2 GB file): write **884 MB/s** (dd: 1,130 MB/s); read 9930 MB/s is cached. No external SSD needed.
 - 72.2 GB free + 45.7 GB purgeable of 465.6 GB. Local snapshots: 0 (only the sealed OS snapshot).
 - Biggest folders: ~/Library/CloudStorage 110 GB (Google Drive), ~/Music 79 GB, ~/Library/Application Support 32 GB,
-  ~/Documents 26 GB, ~/Developer/XDAW 16 GB, ~/.cache 9.6 GB (whisper models), ~/Developer/MYAPP 8.9 GB.
+  ~/Documents 26 GB, ~/Developer/MyDAW 16 GB, ~/.cache 9.6 GB (whisper models), ~/Developer/MYAPP 8.9 GB.
 - Duplicates: the first scan read cloud and app-bundle folders and over-counted (73 GB); it now skips
   CloudStorage (no downloads), app bundles, node_modules, package stores and .git. Real candidates seen:
-  the MyDAW song stems exist 3× (XDAW/gold/work/swap, ~/Music/X DAW Songs, Google Drive), ~150 MB each;
-  the 1.2 GB whisper encoder weights are duplicated in ~/.cache/xdaw. Nothing was deleted: review in the Storage view.
+  the MyDAW song stems exist 3× (MyDAW/gold/work/swap, ~/Music/MyDAW Songs, Google Drive), ~150 MB each;
+  the 1.2 GB whisper encoder weights are duplicated in ~/.cache/mydaw. Nothing was deleted: review in the Storage view.
 - **SSD writes:** 346.3 GB written and 510.6 GB read since boot at 14:49, nearly all swap.
   Tracked per day in the Storage view. Lifetime writes need `brew install smartmontools` (your OK).
 - Pool is storage-aware: < 40 GB free or a slow disk (fsync ≥ 50 ms) → budgets and yellow kick in earlier.
@@ -83,7 +83,7 @@ Both runs hit thermal throttling within the first minute, and the first one wrot
 ### B. "At least 250 GB free": not reachable without removing your own music or projects
 Free now **87 GB**; 250 GB needs **163 GB more**. Checked read-only first: **MyDAW uses the Google Drive folder.**
 Its library roots include your Drive shared folders, and its Media screen reads `Tracks/MyDAW Library`. The Drive
-copy and `~/Music/X DAW Songs` are **not duplicates** (47 vs 78 songs, different names), so neither can go.
+copy and `~/Music/MyDAW Songs` are **not duplicates** (47 vs 78 songs, different names), so neither can go.
 
 | Item | Size | How |
 |---|---|---|
@@ -117,7 +117,7 @@ All 8 passed:
 | MyDAW auto-update tree at background QoS | from its start while you're active; full speed after 2 min idle. **Applied** |
 | Brave `MemorySaverModeSavings=2`, `BackgroundModeEnabled=false` | **Applied** (user defaults); confirm in `brave://policy` after restarting Brave |
 | Speed Up: `simctl shutdown all` when no build/test runs; Clean up: `simctl delete unavailable` | **Applied** |
-| `NSAppSleepDisabled=YES` for MyDAW (`com.xdaw.app`) | **Applied** |
+| `NSAppSleepDisabled=YES` for MyDAW (`com.mydaw.app`) | **Applied** |
 | Non-default 5K scaling in "Needs you" | **Applied** (check only); yours is the default, so nothing shows |
 | Found and fixed: a password prompt ("sfltool wants to make changes") every 2 min from the login-items check | **Fixed**, no admin tools are called automatically |
 | Found and fixed: orange paused Claude.app's sandbox VM for 27 s | **Fixed**: VMs are now protected |
@@ -141,12 +141,12 @@ All 8 passed:
 | Dev | Xcode/xcodebuild parallel compiles | 8 (set by clearx from the pool: 4 healthy, 4 yellow, 2 pressure/hot (8 with more RAM)) | **applied** | — |
 | Dev | Xcode DerivedData location | default (~/Library/Developer/Xcode/DerivedData, internal SSD) | **ok** | — |
 | Dev | Xcode indexing | on (Xcode pauses it while building) | **ok** | — |
-| Dev | ccache for the MyDAW build | not installed | **needs OK** | brew install ccache; then in XDAW's build script: cmake -G Ninja -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache (the Xcode generator ignores compiler launchers) |
-| Dev | MyDAW auto-update interval | every 2 min | **info** | suggestion only (XDAW is not edited by clearx): 15-30 min is plenty; each check that finds a new commit starts a full Release build |
+| Dev | ccache for the MyDAW build | not installed | **needs OK** | brew install ccache; then in MyDAW's build script: cmake -G Ninja -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache (the Xcode generator ignores compiler launchers) |
+| Dev | MyDAW auto-update interval | every 2 min | **info** | suggestion only (MyDAW is not edited by clearx): 15-30 min is plenty; each check that finds a new commit starts a full Release build |
 | Browser | Brave Memory Saver (tab discarding) | policy on | **applied** | defaults write com.brave.Browser HighEfficiencyModeEnabled -bool true |
 | Browser | Brave hardware acceleration | on | **ok** | brave://settings/system > Use graphics acceleration |
 | Browser | Brave extensions / RAM | 0 extensions, 25 processes, 1.8 GB | **ok** | brave://extensions: each extension is a process |
-| Spotlight | mds / mds_stores / mdworker CPU now | 1% | **ok** | System Settings > Spotlight > Search Privacy: add ~/Developer/XDAW/src/build, ~/Developer/XDAW/auto-src/build, ~/Developer/MYAPP/build, node_modules folders |
+| Spotlight | mds / mds_stores / mdworker CPU now | 1% | **ok** | System Settings > Spotlight > Search Privacy: add ~/Developer/MyDAW/src/build, ~/Developer/MyDAW/auto-src/build, ~/Developer/MYAPP/build, node_modules folders |
 | Network | Default route | Wi-Fi (en1) | **info** | Ethernet is lower latency and doesn't share airtime with the Wi-Fi of your other devices |
 | Network | DNS lookup time (uncached) | current 25 ms, 1.1.1.1 23 ms | **ok** | keep current DNS (1.1.1.1 isn't meaningfully faster here) |
 | Display | WindowServer CPU / Reduce transparency | 14% CPU, reduce transparency on | **ok** | System Settings > Accessibility > Display > Reduce transparency |
@@ -166,9 +166,9 @@ All 8 passed:
 - `sudo pmset -a hibernatemode 0` (desktop: no 16 GB RAM image written at each sleep) and `sudo pmset -a sleep 0`.
 - ccache for MyDAW: `brew install ccache`, then build MyDAW with `-G Ninja -DCMAKE_C_COMPILER_LAUNCHER=ccache
   -DCMAKE_CXX_COMPILER_LAUNCHER=ccache` (the Xcode generator ignores compiler launchers). Rebuilds after a pull
-  recompile only what changed. XDAW was not edited.
-- MyDAW auto-update checks every 2 min and full-builds each new commit; 15–30 min would cut build churn (XDAW's call).
-- Spotlight → Search Privacy: add the XDAW/MYAPP build folders and node_modules.
+  recompile only what changed. MyDAW was not edited.
+- MyDAW auto-update checks every 2 min and full-builds each new commit; 15–30 min would cut build churn (MyDAW's call).
+- Spotlight → Search Privacy: add the MyDAW/MYAPP build folders and node_modules.
 - Ethernet instead of Wi-Fi if a cable is near (DNS is fine: 23 ms vs 18 ms for 1.1.1.1).
 - Macs Fan Control: your call. The partial OFF build already hit a 76 % CPU speed limit; the ON run will
   show whether clearx's job cap keeps it at 100 % without a fan curve.

@@ -856,6 +856,12 @@ def _read_procs(c):
     if fpid in procs:
         st.setdefault("front_seen", {})[procs[fpid]["name"]] = now
     is_build = lambda p: matches(p["name"], compilers) or matches(p["name"], build_tools)
+    # away: no input for idle_s and no DAW open (music playing with nobody at the keys still needs a quiet Mac).
+    # Then nothing is waiting on the Mac but the work itself: no heat caps, no pausing the big job at orange.
+    I = conf["interactive"] if conf.has_section("interactive") else {}
+    c.interactive = str(I.get("enabled", "false")).lower() == "true"
+    st["hid_idle"] = round(hid_idle_s()) if c.interactive else 0
+    c.away = c.interactive and st["hid_idle"] >= float(I.get("idle_s", 120)) and mode != "studio"
     c.procs = procs; c.compilers = compilers; c.mode = mode; c.fpid = fpid; c.fg = fg; c.is_build = is_build
 
 
@@ -1067,7 +1073,7 @@ def _heat(c):
             # automatic builders/test runners (e.g. a node --test run spawning one worker per core): their workers
             # live seconds, so lower the long-lived parents too; nice and background QoS carry over to new children
             bp = globs(conf.get("interactive", "build_paths", fallback="/auto-src/, /.worktrees/builder/"))
-            for p in elig if spd < 100 else []:
+            for p in elig if spd < 100 and not c.away else []:  # (away: the builder is the work)
                 if any(x in p["path"] for x in bp) and "T" not in p["stat"]:
                     if p["nice"] < 10:
                         renice(p, dry, f"heat: auto-builder, CPU load {cpu}%")
@@ -1078,10 +1084,9 @@ def _interactive(c, want):
     """While you're using the Mac, builds and local AI step back. Returns the next build's job cap."""
     conf, st, now, dry, procs, compilers, fg, fpid, stage = c.conf, c.st, c.now, c.dry, c.procs, c.compilers, c.fg, c.fpid, c.stage
     I = conf["interactive"] if conf.has_section("interactive") else {}
-    interactive = str(I.get("enabled", "false")).lower() == "true"
+    interactive = c.interactive
     if interactive:
-        idle = hid_idle_s()
-        st["hid_idle"] = round(idle)
+        idle = st["hid_idle"]
         if idle < float(I.get("active_s", 60)) and c.strained:  # you're using a strained Mac: builds yield to you
             want = min(want, int(I.get("active_jobs", 4)))
             if stage >= 1:  # reserve short while you work: the next build step gets 1 job (never SIGSTOP: a
@@ -1129,9 +1134,6 @@ def _interactive(c, want):
             for k, info in list(st.get("bg", {}).items()):  # (the reserve's own holds stay until the reserve is met)
                 if info.get("why", "").startswith("interactive") and not (stage >= 3 and "RAM reserve" in info["why"]):
                     unbackground(int(k), st, "you're away: full speed", dry=dry)
-    c.interactive = interactive
-    # away: no input for idle_s and no DAW open (music playing with nobody at the keys still needs a quiet Mac)
-    c.away = interactive and st.get("hid_idle", 0) >= float(I.get("idle_s", 120)) and c.mode != "studio"
     return want
 
 
@@ -1139,11 +1141,14 @@ def _build_jobs(c):
     """How many compile jobs the next build gets; also runs the build queue."""
     conf, st, now, dry, procs, compilers, fg, level, lvl, P, spd, stage = c.conf, c.st, c.now, c.dry, c.procs, c.compilers, c.fg, c.level, c.lvl, c.P, c.spd, c.stage
     Hc = conf["heat"] if conf.has_section("heat") else {}
-    # Xcode parallelism for the next build follows the pool: 8 healthy, 4 yellow, 2 orange+/throttling
-    J = lambda k, d: int(P.get(k, d))
-    want = J("jobs_pressure", 2) if (lvl >= 2 or spd < 100) else J("jobs_normal", 4) if lvl == 1 \
-        else J("jobs_healthy", 8)
-    if st.get("heat_on"):
+    # Xcode parallelism for the next build follows the pool: all cores healthy, 4 yellow, 2 orange+/throttling while
+    # you're here. Measured 2026-10-31 (healthy pool, no swap): 8 jobs built 58-103 objects in 4 min, 16 built 116,
+    # throttled to 76 % or not; heat caps cost the build more than the heat does, so only for your sake.
+    J = lambda k, d: int(P.get(k, d)) or os.cpu_count() or 8
+    hot = spd < 100 and not c.away
+    want = J("jobs_pressure", 2) if (lvl >= 2 or hot) else J("jobs_normal", 4) if lvl == 1 \
+        else J("jobs_healthy", 0)
+    if st.get("heat_on") and not c.away:
         want = min(want, int(Hc.get("jobs", 6)))
     if stage >= 3:  # reserve: builds give way (2 jobs, background QoS)
         want = min(want, 2)
@@ -1241,7 +1246,10 @@ def _build_guard(c):
         budget = size(mode_cfg(conf, mode, "compiler_budget", conf.get("build_guard", "budget", fallback="6G")))
         if not spill_grace:
             budget = int(budget * {0: 1, 1: 1, 2: 0.5, 3: 0.25}[lvl])
-        max_jobs = int(P.get("thermal_jobs", 4)) if spd < 100 else 10 ** 6
+        if lvl == 0:  # healthy: compilers may also use what's free beyond the RAM reserve
+            RS = conf["reserve"] if conf.has_section("reserve") else {}
+            budget += max(0, c.m["avail"] - size(RS.get("target", "3G")))
+        max_jobs = int(P.get("thermal_jobs", 4)) if spd < 100 and not c.away else 10 ** 6
         if stage >= 3:
             max_jobs = min(max_jobs, 2)
         running = [p for p in elig if matches(p["name"], compilers) and "T" not in p["stat"]]

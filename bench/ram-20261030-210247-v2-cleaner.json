@@ -1,0 +1,43 @@
+{
+ "label": "v2-cleaner",
+ "mode": "cleaner",
+ "seconds": 300,
+ "start": "2026-10-30 21:03:17",
+ "active_pass_ms": {
+  "median": 0.4,
+  "p95": 0.4,
+  "max": 4.4,
+  "over_250ms": 0,
+  "n": 299
+ },
+ "switch_ms": {
+  "median": 1.0,
+  "max": 1.0,
+  "n": 10,
+  "all": [
+   1,
+   1,
+   1,
+   1,
+   1,
+   1,
+   1,
+   1,
+   1,
+   1
+  ]
+ },
+ "spawn_ms": {
+  "median": 4.5,
+  "p95": 4.6,
+  "max": 10.7
+ },
+ "swapin_mb": 57,
+ "swapout_mb": 0,
+ "ssd_written_mb": 44,
+ "job_cpu_s": {
+  "node": 1
+ },
+ "train_steps": 0,
+ "cleaner_runs": 1
+}

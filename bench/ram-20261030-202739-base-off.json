@@ -1,0 +1,44 @@
+{
+ "label": "base-off",
+ "mode": "off",
+ "seconds": 300,
+ "start": "2026-10-30 20:28:09",
+ "active_pass_ms": {
+  "median": 0.4,
+  "p95": 80.6,
+  "max": 396.1,
+  "over_250ms": 3,
+  "n": 289
+ },
+ "switch_ms": {
+  "median": 1377.9,
+  "max": 2060.2,
+  "n": 10,
+  "all": [
+   901,
+   1378,
+   1320,
+   1515,
+   1488,
+   23,
+   2060,
+   1327,
+   430,
+   1990
+  ]
+ },
+ "spawn_ms": {
+  "median": 3.6,
+  "p95": 10.3,
+  "max": 260.3
+ },
+ "swapin_mb": 29528,
+ "swapout_mb": 28325,
+ "ssd_written_mb": 28424,
+ "job_cpu_s": {
+  "llama-finetune-lora": 1009,
+  "node": 2
+ },
+ "train_steps": 1,
+ "cleaner_runs": 0
+}

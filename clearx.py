@@ -201,15 +201,27 @@ def proc_list():
     return procs
 
 
+def footprint(pid):
+    """(phys footprint, wired) bytes from proc_pid_rusage: what top's MEM column shows (compressed and swapped memory
+    included), and memory the process has locked in RAM (mlock). None if unreadable."""
+    try:
+        if not hasattr(footprint, "lib"):
+            import ctypes
+            footprint.lib, footprint.buf = ctypes.CDLL("/usr/lib/libproc.dylib"), (ctypes.c_uint64 * 64)()
+            footprint.ref = ctypes.byref(footprint.buf)
+        b = footprint.buf  # rusage_info_v4 as 64-bit words: [2+5] ri_wired_size, [2+7] ri_phys_footprint
+        return (b[9], b[7]) if footprint.lib.proc_pid_rusage(pid, 4, footprint.ref) == 0 else None
+    except (OSError, AttributeError):
+        return None
+
+
 def add_footprint(procs):
-    """top's MEM column is the phys footprint, which includes compressed/swapped memory -
-    much better than RSS for finding the real hogs. It is ~70% of a tick's cost, so
-    only called when something might need acting on."""
-    for ln in sh("top", "-l", "1", "-o", "mem", "-n", "120", "-stats", "pid,mem").splitlines():
-        mt = re.match(r"\s*(\d+)\s+([\d.]+)([BKMGT])", ln)
-        if mt and int(mt.group(1)) in procs:
-            procs[int(mt.group(1))]["mem"] = int(float(mt.group(2)) * {"B": 1, "K": 1 << 10, "M": 1 << 20,
-                                                                         "G": 1 << 30, "T": 1 << 40}[mt.group(3)])
+    """The phys footprint (includes compressed/swapped memory) is much better than RSS for finding the real hogs.
+    proc_pid_rusage reads it in ~30 ms for every process; `top`, used before, took ~0.8 s of a tick under pressure."""
+    for p in procs.values():
+        f = footprint(p["pid"])
+        if f:
+            p["mem"], p["wired"] = f
     for p in procs.values():
         p["mem"] = max(p.get("mem", 0), p["rss"])
     return procs
@@ -821,23 +833,12 @@ def _read_pool(c):
 
 def _read_procs(c):
     """Process list, mode, and who's in front (never touched)."""
-    conf, st, now, dry, pool, lvl, P = c.conf, c.st, c.now, c.dry, c.pool, c.lvl, c.P
+    conf, st, now, dry = c.conf, c.st, c.now, c.dry
     procs = proc_list()
     compilers = globs(conf.get("build_guard", "compilers", fallback=""))
     build_tools = globs(conf.get("modes", "build_tools", fallback=""))
-    # top's footprint is ~70% of a tick's CPU. Footprint-based choices (pause, budgets) only happen when the pool is
-    # yellow+, swapping or tight; held processes and a build on a green pool don't need it (compiler RSS is its
-    # footprint), so then refresh it at most every footprint_s instead of every tick.
-    near = lvl >= 1 or pool["swap_active"] or st.get("throttled") or pool["tight"]
-    calm_near = st.get("paused") or any(matches(p["name"], compilers) for p in procs.values())
-    if near or (calm_near and now - st.get("footprint_t", 0) >= float(P.get("footprint_s", 60))):
-        st["footprint_t"] = now
-        add_footprint(procs)
-        st["footprint"] = {str(p["pid"]): p["mem"] for p in procs.values() if p["mem"] > p["rss"] + (32 << 20)}
-    else:  # between refreshes: the last footprint where it exceeded RSS (compressed/swapped memory)
-        fp = st.get("footprint", {})
-        for p in procs.values():
-            p["mem"] = max(p["mem"], fp.get(str(p["pid"]), 0))
+    add_footprint(procs)  # (~30 ms for all of them: every tick)
+    st.pop("footprint", None); st.pop("footprint_t", None)
     mode = detect_mode(conf, procs, st)
     if mode != st.get("mode"):
         log(f"MODE {st.get('mode', '?')} -> {mode}")
@@ -1129,6 +1130,8 @@ def _interactive(c, want):
                 if info.get("why", "").startswith("interactive") and not (stage >= 3 and "RAM reserve" in info["why"]):
                     unbackground(int(k), st, "you're away: full speed", dry=dry)
     c.interactive = interactive
+    # away: no input for idle_s and no DAW open (music playing with nobody at the keys still needs a quiet Mac)
+    c.away = interactive and st.get("hid_idle", 0) >= float(I.get("idle_s", 120)) and c.mode != "studio"
     return want
 
 
@@ -1200,11 +1203,15 @@ def _pressure(c):
     if lvl >= 1:
         heavy = globs(conf.get("heavy", "names", fallback=""))
         for p in bgc:
-            if matches(p["name"], heavy) or p["mem"] >= size(L["red_proc_min"]):
+            # a 15 MB Python script frees nothing by waiting: only ones that hold real memory step back
+            if p["mem"] >= size(P.get("pause_min", "200M")) and (matches(p["name"], heavy) or p["mem"] >= size(L["red_proc_min"])):
                 renice(p, dry, f"level {level}")
                 background(p, st, dry, f"level {level}")
     pausable = [p for p in pausable if str(p["pid"]) not in st.get("paused", {})]
-    if lvl == 2 and pausable:
+    # you're away: the big background job is the work now (MyApp's trainer only runs then). Pausing it at orange only
+    # had macOS swap it out, the pool turn green because of that, and the job swap back in on resume: 78 rounds of
+    # ~7 GB each way in two days. It stays at background QoS instead; red still pauses (swap death protection).
+    if lvl == 2 and pausable and not c.away:
         top = max(pausable, key=lambda p: p["mem"])
         if top["mem"] >= size(P.get("pause_min", "200M")):
             pause(top, st, dry, "pool orange, largest background process")
@@ -1271,8 +1278,12 @@ def _release_healthy(c):
     # resume only after a steady green (a paused process's memory gets swapped out; resuming it right before the
     # next orange swaps it back in: pause/resume flapping is pure SSD churn), then don't re-pause it for a while
     steady = now - st.get("level_since", now) >= conf.getfloat("resume", "steady_s", fallback=60)
-    if lvl == 0 and calm and steady:
-        pp = [(k, i) for k, i in st.get("paused", {}).items() if i.get("kind") not in ("build", "freeze", "hold", "queue")]
+    pp = [(k, i) for k, i in st.get("paused", {}).items() if i.get("kind") not in ("build", "freeze", "hold", "queue")]
+    if c.away and lvl < 3 and pp:  # paused while you were here; now nobody is waiting on the memory it would take
+        k, info = max(pp, key=lambda kv: kv[1].get("mem", 0))
+        resume(int(k), st, "you're away: background work runs", dry=dry,
+               cooldown_s=conf.getfloat("resume", "repause_cooldown_min", fallback=10) * 60)
+    elif lvl == 0 and calm and steady:
         if pp:
             k, info = min(pp, key=lambda kv: kv[1].get("mem", 0))
             resume(int(k), st, "pool healthy", dry=dry, cooldown_s=conf.getfloat("resume", "repause_cooldown_min", fallback=10) * 60)

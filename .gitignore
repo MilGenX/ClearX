@@ -11,3 +11,6 @@ test/bin/
 clearx.conf.bak-*
 clearx.py.new
 diagnostics/
+bench/ram-*.csv
+bench/ram-probe
+bench/ram-idle

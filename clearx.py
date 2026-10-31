@@ -696,7 +696,7 @@ def set_xcode_jobs(n, st, dry, why):
     log(f"XCODE jobs -> {n} ({why}){' [dry-run]' if dry else ''}")
 
 
-AUTO_BG = ("pool", "level", "budget", "spill", "thermal", "mode build", "interactive")
+AUTO_BG = ("pool", "level", "budget", "spill", "thermal", "mode ", "interactive")
 ACTIVATIONS = os.path.join(STATE_DIR, "activations.json")  # written by ClearX.app on every app switch
 
 

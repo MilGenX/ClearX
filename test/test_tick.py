@@ -55,6 +55,37 @@ class Tick(unittest.TestCase):
         self.assertIn(HOG, self.signals(fm, CONT))
         self.assertEqual(fm.state["paused"], {})
 
+    def orange(self, fm):
+        fm.swap_out(2000)  # 2 GB in one tick: ~33 MB/s over the minute, with under 4 GB available
+        fm.mem.update(avail=3 * GB)
+        return fm.tick(cx)
+
+    def test_orange_pauses_the_largest_background_job_while_you_work(self):
+        fm = machine()
+        fm.idle = 5
+        fm.tick(cx)
+        st = self.orange(fm)
+        self.assertEqual(st["level"], "orange")
+        self.assertIn(HOG, self.signals(fm, STOP))
+
+    def test_orange_leaves_the_background_job_running_while_you_are_away(self):
+        fm = machine()
+        fm.tick(cx)
+        st = self.orange(fm)
+        self.assertEqual(st["level"], "orange")
+        self.assertNotIn(HOG, self.signals(fm, STOP))
+        self.assertIn(str(HOG), st.get("bg", {}))  # still lowered: its paging waits behind everything else
+
+    def test_job_paused_while_you_worked_resumes_once_you_are_away(self):
+        fm = machine()
+        fm.idle = 5
+        fm.tick(cx)
+        self.orange(fm)
+        fm.idle = 300
+        st = self.orange(fm)
+        self.assertIn(HOG, self.signals(fm, CONT))
+        self.assertNotIn(str(HOG), st["paused"])
+
     def test_level_steps_down_one_at_a_time(self):
         fm = machine()
         fm.tick(cx)

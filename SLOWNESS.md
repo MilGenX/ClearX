@@ -134,3 +134,11 @@ Builds now run as fast with ClearX as without it (+3 to +8 %, within noise). The
 came from studio mode: with MyDAW open, ClearX kept every Python script and Brave at background QoS all the time, the
 benchmark's own script included. Fixed right after (studio mode now lowers them only when the Mac is strained); that
 fix is covered by a unit test, not re-measured.
+
+## 4 GB VRAM with real apps open (2026-10-31 15:30)
+
+MyDAW (open), Brave, Claude and MyApp's local AI on the Radeon (Vulkan build, as many layers as fit), sampled every 5 s
+for a minute: VRAM in use **2.8-3.5 GB of 4 GB**, GPU memory spilled into RAM steady at **~0.1 GB** (not growing), so
+everything runs inside the card's 4 GB. When something does push it over while memory is short, ClearX backgrounds
+the GPU-heavy background apps first (seen today at 15:08: spill 24.8 MB/s at yellow -> WebKit GPU and
+MTLCompilerService lowered, pool green again 43 s later).

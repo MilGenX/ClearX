@@ -12,7 +12,7 @@ defaults delete com.brave.Browser HighEfficiencyModeEnabled 2>/dev/null
 defaults delete com.brave.Browser MemorySaverModeSavings 2>/dev/null
 defaults delete com.brave.Browser BackgroundModeEnabled 2>/dev/null
 defaults delete com.brave.Browser DiskCacheSize 2>/dev/null
-defaults delete com.xdaw.app NSAppSleepDisabled 2>/dev/null          # App Nap back to the default for MyDAW
+defaults delete com.mydaw.app NSAppSleepDisabled 2>/dev/null          # App Nap back to the default for MyDAW
 launchctl unsetenv CMAKE_BUILD_PARALLEL_LEVEL; launchctl unsetenv MAKEFLAGS   # (clearx off does this too)
 DD=~/Library/Developer/Xcode/DerivedData
 tmutil removeexclusion "$DD" 2>/dev/null; rm -f "$DD/.metadata_never_index"

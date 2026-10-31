@@ -117,11 +117,14 @@ Trash). Its root helper needs your password: `sudo ~/Developer/ClearX/remove-cle
 
 ### RAM reserve, App Freezer, interactive-aware builds (v3.1)
 
-- **RAM reserve** (`[reserve]`, default 10 GB). The controller's first goal is to keep 10 GB *ready to use*
+- **Normal speed first.** When memory is fine and macOS isn't lowering the CPU speed, ClearX slows nothing down:
+  builds run side by side with all their jobs, AI servers and busy apps run at full speed. It steps in only when
+  the pool turns yellow or worse, the reserve below is short, or the Mac is heat-throttling.
+- **RAM reserve** (`[reserve]`, default 3 GB). The controller's first goal is to keep 3 GB *ready to use*
   (free + file cache macOS reuses instantly). Below it, one step per tick: (1) freeze idle hidden apps,
   browsers' tab renderers only; (2) keep doing so even when the pool is green; (3) builds to 2 jobs at
   background QoS; (4) also freeze hidden apps idle ≥ 1 min. It never touches the front app, audio, the DAW or
-  downloads. If what you're using plus the build leave less than 10 GB, it says so in the menu ("the reserve
+  downloads. If what you're using plus the build leave less than 3 GB, it says so in the menu ("the reserve
   comes back when the build finishes") and stops at step 2 instead of throttling the build for nothing.
 - **App Freezer** (`[freezer]`). A frozen app (SIGSTOP) stops using CPU and its memory gets compressed or
   swapped once instead of churning. ClearX.app (`app/Sources/Freezer.swift`) watches every app switch and
@@ -140,7 +143,7 @@ Trash). Its root helper needs your password: `sudo ~/Developer/ClearX/remove-cle
   `clearx off` and `uninstall.sh` unset them.
 - **Other user-level settings** (all removed by `uninstall.sh`): Brave `MemorySaverModeSavings = 2` (maximum)
   and `BackgroundModeEnabled = false` (Brave doesn't keep running after its last window closes); check
-  `brave://policy` to confirm Brave lists them. `NSAppSleepDisabled = YES` for MyDAW (`com.xdaw.app`), so App
+  `brave://policy` to confirm Brave lists them. `NSAppSleepDisabled = YES` for MyDAW (`com.mydaw.app`), so App
   Nap never throttles it. Speed Up also shuts down booted iOS simulators when no build or test is running.
 - **Storage goal**: `clearx maintain plan 250` (and the Storage page) works out what it would take to have
   250 GB free, item by item, with one button each. Nothing is deleted from there.
@@ -161,7 +164,7 @@ Trash). Its root helper needs your password: `sudo ~/Developer/ClearX/remove-cle
   logged, never touched.
 - **Thermal.** clearx reads `pmset -g therm` every tick (see the pool table for what it does).
   The app also shows the CPU temperature from the SMC (no root needed).
-- **One mode: Max.** There's nothing to pick. clearx detects by itself when a DAW (MyDAW/XDAW, Logic,
+- **One mode: Max.** There's nothing to pick. clearx detects by itself when a DAW (MyDAW, Logic,
   Ableton …) or a build (xcodebuild, SWBBuildService, ninja, make, cargo + compilers) is running, and
   that only changes priorities: with a DAW open, Brave, Google Drive, node, Python and VMs are kept at
   background QoS, per-app budgets are halved and the compiler budget is 3 GB; during a build, Brave is

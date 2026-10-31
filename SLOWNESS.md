@@ -85,3 +85,36 @@ drifting over the hour shows up as a difference between the two ON runs.
 ClearX costs about 3 % of build speed in a window this short and cuts swap-out by 66–91 %; only the OFF run reached
 the warn pressure level. Process start times overlap between runs (the 2nd ON run had the highest), so the Mac's
 feel during a build is within noise either way.
+
+## What more RAM would change, measured (2026-10-30, `bench/ram-series.sh`)
+
+Each run is 5 minutes on top of what the Mac was doing: you were away and MyApp's LoRA fine-tune was running (it needs
+~11.6 GB on its own and swapped 60-190 MB/s). Stand-ins (`bench/ram-probe.c`): the app in use (1 GB, a tenth touched
+every second) and 4 hidden apps (400 MB each, one switched to every 20 s). "Cleaner" = ClearX off plus what memory
+cleaner apps do without admin rights (allocate and touch 2 GB so macOS drops caches when free memory < 1 GB).
+
+| With the fine-tune running | macOS alone (off) | Cleaner method | ClearX before | **ClearX now** |
+|---|---|---|---|---|
+| Switching back to a hidden app (median) | 1378 ms | 1141 ms | 691 ms / 1 ms | **225 ms** |
+| Fine-tune progress (CPU s in 5 min) | 1009 | 1016 | 573 / 212 | **809** |
+| Starting a small program, p95 | 10.3 ms | 10.1 ms | 351 ms / 100 ms | **10.6 ms** |
+| Swap in + out | 57.9 GB | 57.9 GB | 29.3 / 17.6 GB | **39.1 GB** |
+| SSD writes | 28.4 GB | 28.6 GB | 15.2 / 7.8 GB | **20.6 GB** |
+
+- One run per column ("ClearX now" ran 30 min after the off run; the fine-tune stopped when you came back, before a
+  second round could run), so treat differences under ~20 % as noise.
+- **ClearX before** paused the fine-tune at orange (two runs: it paused it for part of the first and most of the
+  second), which is why switching was fast and the fine-tune got 21-57 % of its progress. It also lowered the
+  benchmark's own 15 MB Python process, which is the 351 ms start time. Both fixed: orange doesn't pause the big job
+  while you're away, and processes under 200 MB aren't lowered.
+- **ClearX now** switches 6x faster than macOS alone and keeps 80 % of the fine-tune's progress: the job runs at
+  background QoS, so its paging waits behind the apps.
+- **Cleaner method**: no better than macOS alone. macOS refills what it drops.
+- **Healthy Mac** (the fine-tune stopped when you came back; three more runs): off, cleaner and ClearX all switch in
+  1 ms and start programs in 4.6 ms p95. ClearX adds nothing when nothing is wrong.
+- **Where RAM still wins**: with macOS alone the fine-tune already gets 84 % of its 4 threads while swapping, so more
+  RAM would make it at most ~19 % faster. What 16 GB costs here is the **SSD**: 20-28 GB written per 5 minutes of
+  training (~240-340 GB/hour). Only less memory demand stops that: MyApp's server locks its 2.6 GB model in RAM
+  (`--load-mode mmap+mlock`, visible as 2.6 GB wired) and the trainer loads a second copy of the same model at Q8
+  (4.2 GB). Those are MyApp's settings (not changed).
+- ClearX's own tick under pressure: 1.2 s → 0.6 s (footprints from `proc_pid_rusage` instead of `top`).

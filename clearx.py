@@ -1168,8 +1168,10 @@ def _build_jobs(c):
 def _mode_priorities(c):
     """Studio and build modes lower the apps competing with them."""
     conf, st, dry, mode, lvl, bgc = c.conf, c.st, c.dry, c.mode, c.lvl, c.bgc
-    # mode: studio always keeps the DAW's competition backgrounded; build mode only when the pool needs it
-    if mode == "studio" or (mode == "build" and lvl >= 1):
+    # mode: the DAW's and the build's competition step back only when the Mac is strained (memory short or macOS lowering
+    # the CPU speed). With MyDAW merely open it lowered every Python script and Brave all the time, the bench's own 14 MB
+    # script included (process start p95 46-104 ms vs 5 ms off, 2026-10-31); CoreAudio's own threads outrank them anyway.
+    if (mode == "studio" and c.strained) or (mode == "build" and lvl >= 1):
         for p in bgc:
             if matches(p["name"], globs(mode_cfg(conf, mode, "background", ""))):
                 background(p, st, dry, f"mode {mode}")

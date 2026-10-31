@@ -118,3 +118,19 @@ cleaner apps do without admin rights (allocate and touch 2 GB so macOS drops cac
   (`--load-mode mmap+mlock`, visible as 2.6 GB wired) and the trainer loads a second copy of the same model at Q8
   (4.2 GB). Those are MyApp's settings (not changed).
 - ClearX's own tick under pressure: 1.2 s → 0.6 s (footprints from `proc_pid_rusage` instead of `top`).
+
+## MyDAW build, ClearX ON vs OFF after the fixes (4-minute windows, 2026-10-31 15:07)
+
+Same clean MyDAW Release build, cut off after 240 s, ON, OFF, ON (`bench/mydaw-window.sh`). MyDAW was open (studio mode).
+
+| Metric | ON (1st) | OFF | ON (2nd) | Before the fixes (09:31: ON / OFF / ON) |
+|---|---|---|---|---|
+| Objects built in the window | **120** | 111 | **114** | 58 / 116 / 103 |
+| Compile jobs | 16 | 16 (Xcode default) | 16 | 8 / 16 / 8 |
+| Swap-out | 0.7 GB | 0 | 0.7 GB | 0 / 0 / 1.3 GB |
+| Process start, p95 | 104 ms | 4.9 ms | 46 ms | 4.0 / 3.5 / 8.0 ms |
+
+Builds now run as fast with ClearX as without it (+3 to +8 %, within noise). The slower process starts in the ON runs
+came from studio mode: with MyDAW open, ClearX kept every Python script and Brave at background QoS all the time, the
+benchmark's own script included. Fixed right after (studio mode now lowers them only when the Mac is strained); that
+fix is covered by a unit test, not re-measured.

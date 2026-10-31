@@ -105,6 +105,17 @@ class Tick(unittest.TestCase):
         fm.tick(cx)
         self.assertEqual(self.jobs(fm), str(os.cpu_count()))
 
+    def test_open_daw_lowers_nothing_while_the_mac_is_fine(self):
+        fm = machine()
+        fm.procs[60] = proc(60, "MyDAW", 500 * MB)
+        fm.procs[70] = proc(70, "Brave Browser", 400 * MB)
+        st = fm.tick(cx)
+        self.assertEqual(st["mode"], "studio")
+        self.assertNotIn("70", st.get("bg", {}))
+        fm.speed = 76  # macOS lowering the CPU speed: now the DAW's competition steps back
+        st = fm.tick(cx)
+        self.assertIn("70", st.get("bg", {}))
+
     def test_level_steps_down_one_at_a_time(self):
         fm = machine()
         fm.tick(cx)

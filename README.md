@@ -43,19 +43,19 @@ from the foreground Terminal still counts as a build).
 
 | Situation | What clearx does, in order |
 |---|---|
-| Pool healthy (green, not swapping, ≥ 1.5 GB available) | Releases everything: resumes paused processes one per tick (smallest first), removes background QoS after 60 s calm, and sets Xcode to **4** parallel compiles for the next build (MyDAW compile jobs use ~1.4 GB each; 8 = ~11 GB) |
+| Pool healthy (green, not swapping, ≥ 1.5 GB available) | Releases everything: resumes paused processes one per tick (smallest first), removes background QoS after 60 s calm, and gives the next build **one compile per CPU thread** (Xcode's own default: 16 jobs built twice what 8 did, with no swap, 2026-10-31); the build guard lets compilers use what's free beyond the 3 GB reserve |
 | Yellow (swapping ≥ 8 MB/s over the last minute, or pressure warn) | Soft budgets apply; heavy and ≥ 500 MB background processes get `renice 10` + background QoS. Xcode cap **4**. Build mode backgrounds Brave |
 | Orange (swapping ≥ 25 MB/s or pressure warn, with < 4 GB available; or exhaustion predicted < 60 s) | Also pauses the largest background process (≥ 200 MB), **only while you're at the Mac**: when you've been away 2 min (and no DAW is open) the big background job is the work, so it stays running at background QoS, and one paused while you worked is resumed. The compiler memory budget halves. Xcode cap **2** |
 | Red (swapping ≥ 50 MB/s with < 2 GB available, or pressure critical) | Pauses every background process ≥ 500 MB; compiler budget is a quarter (the oldest job always runs) |
 | GPU spilling into RAM (≥ 8 MB/s over 30 s) while the pool is yellow+ | Backgrounds the GPU-heavy *background* apps first (WebKit GPU, Brave GPU, MTLCompilerService, VMs); the build guard waits 20 s before tightening the compiler budget |
-| CPU thermal throttling (`CPU_Speed_Limit` < 100) | First cuts compiler parallelism (at most 4 compile jobs at once, Xcode cap 2); if it's still throttling after 60 s, backgrounds the GPU-heavy/browser background apps too |
+| CPU thermal throttling (`CPU_Speed_Limit` < 100) | **Only while you're at the Mac:** first cuts compiler parallelism (at most 4 compile jobs at once, Xcode cap 2); if it's still throttling after 60 s, backgrounds the GPU-heavy/browser background apps too. When you're away, builds keep every job: a throttled 16-job build still beat a 4-job one by 2x |
 | VRAM full but pool healthy | Nothing. Full VRAM is fine |
 | Disk tight (< 40 GB free on the swap volume, or a 4 KB write + fsync ≥ 50 ms) | The pool goes yellow as soon as RAM is tight (available < 4 GB or swapping), and budgets apply even at green |
 
 The state only steps down one level per tick, so it doesn't flap between orange and green when
 swap-outs pause for a moment. The Xcode cap goes down at once and up only after 60 s.
 
-**Xcode parallelism.** clearx writes `IDEBuildOperationMaxNumberOfConcurrentCompileTasks` (4 / 4 / 2)
+**Xcode parallelism.** clearx writes `IDEBuildOperationMaxNumberOfConcurrentCompileTasks` (16 / 4 / 2)
 from the pool. Xcode and xcodebuild read it when a build *starts*, so it sets the next build's parallelism.
 For a build that's already running, the build guard does the live work (pausing the newest compile jobs).
 `clearx off` deletes the key (Xcode's own default: one compile per CPU thread).
@@ -112,7 +112,7 @@ Trash). Its root helper needs your password: `sudo ~/Developer/ClearX/remove-cle
 |---|---|
 | **4 GB of VRAM** on the Radeon. It's physical memory on the graphics card. **System RAM can't become VRAM** on an Intel Mac. The Apple Silicon `iogpu.wired_limit_mb` trick doesn't exist here. When VRAM is full, macOS pages textures over PCIe (GART), which is slow. | Run RAM + VRAM as one 20 GB pool: full VRAM is fine; when the GPU spills into RAM *under pressure*, the GPU-heavy background apps give way first |
 | **16 GB RAM** (2 × 8 GB DDR4-2666 in 2 of the 4 SO-DIMM slots). Not soldered: the rear hatch takes 260-pin DDR4-2666 SO-DIMMs, up to 64 GB (Apple's max). Measured 2026-10-26: 650 GB of SSD traffic in 3.7 h since boot, almost all swap. Adding 2 × 16 GB (32 GB total) is the only real fix. | Pause/renice/background hogs, cap compiler memory, predict exhaustion, auto-resume |
-| **i9-9900K thermal and power envelope.** The iMac's cooling can't hold all-core turbo, so it throttles under long loads. clearx never undervolts or disables Turbo. | CPU governor (background QoS, then duty-cycling), thermal watch, Xcode capped at 4 parallel compiles |
+| **i9-9900K thermal and power envelope.** The iMac's cooling can't hold all-core turbo, so it throttles under long loads. clearx never undervolts or disables Turbo. | CPU governor (background QoS, then duty-cycling), thermal watch, compile jobs capped while you're at the Mac and it's throttling |
 | No GPU switching (iMac19,1 always uses the Radeon; `pmset gpuswitch` is irrelevant here) | Reduce Transparency/Motion lowers WindowServer GPU load at 5K (optional, your call) |
 
 ### RAM reserve, App Freezer, interactive-aware builds (v3.1)
@@ -248,7 +248,7 @@ signals being sent.
 ## Other system changes (all reversed by uninstall.sh)
 
 - `com.apple.dt.Xcode IDEBuildOperationMaxNumberOfConcurrentCompileTasks` is now set by the daemon from
-  the pool (4 / 4 / 2) and read by Xcode/xcodebuild when each build starts. `clearx off` and
+  the pool (16 / 4 / 2) and read by Xcode/xcodebuild when each build starts. `clearx off` and
   `uninstall.sh` delete it.
 - `defaults write com.brave.Browser HighEfficiencyModeEnabled -bool true` (Memory Saver policy).
   Brave's own setting was already on (`high_efficiency_mode state=2`). Check `brave://policy`

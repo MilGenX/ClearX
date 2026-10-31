@@ -86,6 +86,25 @@ class Tick(unittest.TestCase):
         self.assertIn(HOG, self.signals(fm, CONT))
         self.assertNotIn(str(HOG), st["paused"])
 
+    def jobs(self, fm):
+        return [c[1][-1] for c in fm.calls if c[0] == "run" and "IDEBuildOperationMaxNumberOfConcurrentCompileTasks" in c[1]][-1]
+
+    def test_next_build_gets_every_core_when_memory_is_fine(self):
+        fm = machine()
+        fm.tick(cx)
+        self.assertEqual(self.jobs(fm), str(os.cpu_count()))
+
+    def test_heat_caps_builds_only_while_you_are_here(self):
+        fm = machine()
+        fm.speed = 76
+        fm.idle = 5
+        fm.tick(cx)
+        self.assertEqual(self.jobs(fm), "2")
+        fm = machine()
+        fm.speed = 76
+        fm.tick(cx)
+        self.assertEqual(self.jobs(fm), str(os.cpu_count()))
+
     def test_level_steps_down_one_at_a_time(self):
         fm = machine()
         fm.tick(cx)

@@ -115,6 +115,10 @@ class Tick(unittest.TestCase):
         fm.speed = 76  # macOS lowering the CPU speed: now the DAW's competition steps back
         st = fm.tick(cx)
         self.assertIn("70", st.get("bg", {}))
+        fm.speed = 100  # and back to normal once the Mac has been fine for a while
+        for _ in range(10):
+            st = fm.tick(cx)
+        self.assertNotIn("70", st.get("bg", {}))
 
     def test_level_steps_down_one_at_a_time(self):
         fm = machine()

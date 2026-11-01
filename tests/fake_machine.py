@@ -4,7 +4,7 @@ import copy, json, os, types
 
 GB = 1 << 30
 MB = 1 << 20
-LIVE_CONF = os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "clearx.conf")
+LIVE_CONF = os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "config", "clearx.conf")
 
 
 def proc(pid, name, mem=100 * MB, ppid=1, path=None, cpu=1.0, stat="S", nice=0):

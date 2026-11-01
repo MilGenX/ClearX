@@ -8,7 +8,7 @@ import UserNotifications
 
 // the ClearX folder: install.sh records it (defaults write com.user.clearx home <folder>)
 let MG_DIR = UserDefaults.standard.string(forKey: "home") ?? NSString(string: "~/Developer/ClearX").expandingTildeInPath
-let MG_CLI = MG_DIR + "/clearx"
+let MG_CLI = MG_DIR + "/bin/clearx"
 let STATE = MG_DIR + "/state/state.json"
 let OFF = MG_DIR + "/state/disabled"
 private let HOST_NAME = Host.current().localizedName ?? "Your Mac"  // (once: it can be slow)

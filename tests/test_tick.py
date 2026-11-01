@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""What a whole tick does, on a fake Mac (test/fake_machine.py): no real processes, signals or commands.
-  python3 -m unittest discover -s test
+"""What a whole tick does, on a fake Mac (tests/fake_machine.py): no real processes, signals or commands.
+  python3 -m unittest discover -s tests
 """
 import os, signal, sys, tempfile, unittest
 
 D = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 TMP = tempfile.mkdtemp(prefix="clearx-unit-")
 os.environ.update(CLEARX_STATE=TMP, CLEARX_LOGS=TMP)
-sys.path.insert(0, D)
+sys.path.insert(0, os.path.join(D, "src"))
 sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
 import clearx as cx  # noqa: E402
 from fake_machine import FakeMachine, proc, GB, MB  # noqa: E402

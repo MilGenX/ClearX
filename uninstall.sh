@@ -1,7 +1,7 @@
 #!/bin/sh
 # Removes ClearX completely and undoes every change it made. Resumes anything it paused first.
 D=$(cd "$(dirname "$0")" && pwd)
-/usr/bin/python3 "$D/clearx.py" off            # resumes paused, removes background QoS, stops CPU throttles
+/usr/bin/python3 "$D/src/clearx.py" off            # resumes paused, removes background QoS, stops CPU throttles
 for A in ClearX; do osascript -e "quit app \"$A\"" 2>/dev/null; pkill -x $A 2>/dev/null; done
 for L in com.user.clearx com.user.clearx.menubar; do
   launchctl bootout gui/$(id -u)/$L 2>/dev/null; rm -f ~/Library/LaunchAgents/$L.plist

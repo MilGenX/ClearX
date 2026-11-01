@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """v3 self-tests with fake processes only, against an isolated state dir and a test config (the live daemon's
-state is untouched). Fake compiler = test/bin/clang (the memory hog under a compiler's name).
+state is untouched). Fake compiler = tests/bin/clang (the memory hog under a compiler's name).
 Fake app = TextEdit (opened fresh by the test, quit at the end).
-  python3 test/selftest-v3.py   -> test/selftest-v3.log
+  python3 tests/selftest-v3.py   -> tests/selftest-v3.log
 """
 import json, os, re, shutil, signal, subprocess, sys, tempfile, time
 
@@ -16,10 +16,10 @@ s = re.sub(r"(\[freezer\][^\[]*?)idle_min = 5", r"\1idle_min = 0", s)
 s = re.sub(r"(\[freezer\][^\[]*?)min_mem = 300M", r"\1min_mem = 1M", s)
 s = re.sub(r"(\[interactive\][^\[]*?)enabled = false", r"\1enabled = true", s)
 s = re.sub(r"(\[reserve\][^\[]*?)enabled = false", r"\1enabled = true", s)
-s = s.replace("target_regex =", "target_regex = (test/bin/clang|TextEdit)")
+s = s.replace("target_regex =", "target_regex = (tests/bin/clang|TextEdit)")
 open(CONF, "w").write(s)
 os.environ.update(CLEARX_CONF=CONF, CLEARX_STATE=TMP, CLEARX_LOGS=TMP)
-sys.path.insert(0, D)
+sys.path.insert(0, os.path.join(D, "src"))
 import clearx as mg  # noqa: E402
 
 out = open(os.path.join(D, "test", "selftest-v3.log"), "w")
@@ -52,7 +52,7 @@ say(f"== clearx v3 self-test {time.strftime('%Y-%m-%d %H:%M:%S')} (isolated stat
 
 # --- 1. interactive-aware builds -------------------------------------------------------------------------
 say("\n-- 1. interactive-aware builds (fake clang, 300 MB)")
-c = subprocess.Popen([os.path.join(D, "test/bin/clang"), "100", "300", "100"])
+c = subprocess.Popen([os.path.join(D, "tests/bin/clang"), "100", "300", "100"])
 time.sleep(4)
 st = tick(hid_idle_s=lambda: 5)
 bg = st.get("bg", {}).get(str(c.pid), {})

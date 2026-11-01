@@ -7,7 +7,7 @@
   <key>ProgramArguments</key>
   <array>
     <string>/usr/bin/python3</string>
-    <string>__CLEARX__/clearx.py</string>
+    <string>__CLEARX__/src/clearx.py</string>
     <string>tick</string>
   </array>
   <key>StartInterval</key><integer>10</integer>

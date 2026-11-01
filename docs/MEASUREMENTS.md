@@ -1,13 +1,13 @@
 # Measurements
 
 All on the development Mac: a 2019 iMac (Intel i9-9900K, 16 GB RAM, Radeon Pro 575X with 4 GB VRAM, macOS 15).
-Each table is one run per column, so treat differences under about 20 % as noise. The scripts are in `bench/` and
-the raw results of the memory benchmark are in `bench/ram-*.json`.
+Each table is one run per column, so treat differences under about 20 % as noise. The scripts are in `benchmarks/` and
+the raw results of the memory benchmark are in `benchmarks/ram-*.json`.
 
 ## A busy Mac: switching apps while a big background job fills memory
 
-`bench/ram-series.sh`, 5 minutes per run. A local AI fine-tune (`llama-finetune-lora`, about 11.6 GB on its own,
-swapping 60-190 MB/s) runs in the background. Stand-ins from `bench/ram-probe.c` play the app in use (1 GB, a tenth
+`benchmarks/ram-series.sh`, 5 minutes per run. A local AI fine-tune (`llama-finetune-lora`, about 11.6 GB on its own,
+swapping 60-190 MB/s) runs in the background. Stand-ins from `benchmarks/ram-probe.c` play the app in use (1 GB, a tenth
 touched every second) and 4 hidden apps (400 MB each, one switched to every 20 s). "Cleaner method" is ClearX off
 plus what memory-cleaner apps do without admin rights: allocate and touch 2 GB so macOS drops its caches when free
 memory falls under 1 GB.
@@ -47,7 +47,7 @@ grow, so nothing needed to move.
 
 ## A day of use: why the Mac felt slow, before and after
 
-`bench/slowness-sample.py` recorded memory, swap, CPU speed limit, load and per-process CPU and disk I/O every 10 s.
+`benchmarks/slowness-sample.py` recorded memory, swap, CPU speed limit, load and per-process CPU and disk I/O every 10 s.
 Over 15 minutes of normal use it found that most stalls came from background builds and a local AI server running
 during work. They were fixed by letting those step back while you're at the Mac (ClearX), and by the projects
 themselves. Over the same length of time afterwards:

@@ -3,9 +3,9 @@
 processes, no root) over N seconds, plus the system totals (IOKit) and swap (vm_stat).
 Kernel swap and root daemons (Spotlight, fileproviderd) can't be read per process without root; they show
 up as the difference between the system total and the per-process sum.
-  python3 bench/io-top.py [seconds]"""
-import ctypes, os, re, subprocess, sys, time
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
+  python3 benchmarks/io-top.py [seconds]"""
+import ctypes, os, re, sys, time
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "src"))
 import clearx as mg  # noqa: E402
 
 lib = ctypes.CDLL("/usr/lib/libproc.dylib")

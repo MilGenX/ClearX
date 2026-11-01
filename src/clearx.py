@@ -23,10 +23,11 @@ Usage:
 """
 import configparser, fnmatch, json, os, re, signal, subprocess, sys, time, types
 
-HOME = os.path.dirname(os.path.realpath(__file__))
-CONF = os.environ.get("CLEARX_CONF", os.path.join(HOME, "clearx.conf"))
-# your own settings, read after clearx.conf and never committed (see clearx.local.conf.example)
-LOCAL_CONF = os.environ.get("CLEARX_LOCAL_CONF", os.path.join(HOME, "clearx.local.conf"))
+# the ClearX folder (this file is in src/); state/ and logs/ live there, settings in config/
+HOME = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+CONF = os.environ.get("CLEARX_CONF", os.path.join(HOME, "config", "clearx.conf"))
+# your own settings, read after clearx.conf and never committed (see config/clearx.local.conf.example)
+LOCAL_CONF = os.environ.get("CLEARX_LOCAL_CONF", os.path.join(HOME, "config", "clearx.local.conf"))
 STATE_DIR = os.environ.get("CLEARX_STATE", os.path.join(HOME, "state"))
 LOG_DIR = os.environ.get("CLEARX_LOGS", os.path.join(HOME, "logs"))
 STATE_FILE = os.path.join(STATE_DIR, "state.json")
@@ -1458,8 +1459,8 @@ def junk():
 
 # ---------- bench ----------
 def bench(seconds=60, step=2):
-    os.makedirs(os.path.join(HOME, "bench"), exist_ok=True)
-    path = os.path.join(HOME, "bench", time.strftime("bench-%Y%m%d-%H%M%S.csv"))
+    os.makedirs(os.path.join(HOME, "benchmarks"), exist_ok=True)
+    path = os.path.join(HOME, "benchmarks", time.strftime("bench-%Y%m%d-%H%M%S.csv"))
     last = metrics()["swapouts"]
     with open(path, "w") as f:
         f.write("time,cpu_speed_limit,sched_limit,load1,swap_mb,swapout_mb_s,free_mb,vram_mb,gpu_pct\n")
@@ -1483,9 +1484,9 @@ def bench_run(label, cmd, guard_swap=None, guard_avail=None, step=2, logfile=Non
     guard_*: abort (SIGINT, then SIGTERM; never SIGKILL) if swap grows by more than guard_swap over the start,
     or available memory (free + inactive + purgeable) drops below guard_avail; max_s: the same after that long.
     Each sample also times what you'd feel: starting a tiny program, waking from a short sleep and a small synced
-    disk write (spawn_ms, wake_ms, fsync_ms). Writes CSV + JSON in bench/."""
-    os.makedirs(os.path.join(HOME, "bench"), exist_ok=True)
-    base = os.path.join(HOME, "bench", time.strftime("run-%Y%m%d-%H%M%S-") + label)
+    disk write (spawn_ms, wake_ms, fsync_ms). Writes CSV + JSON in benchmarks/."""
+    os.makedirs(os.path.join(HOME, "benchmarks"), exist_ok=True)
+    base = os.path.join(HOME, "benchmarks", time.strftime("run-%Y%m%d-%H%M%S-") + label)
     m0 = metrics()
     w0 = ssd_counters()[0]
     r = dict(label=label, cmd=cmd, clearx="off" if os.path.exists(OFF_FILE) else "on", start=time.time(),
@@ -1783,7 +1784,7 @@ def boost(quit_names=None, as_json=False):
 
 # ---------- maintain ----------
 def maintain(args):
-    sys.path.insert(0, HOME)
+    sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
     import maint
     sub = args[0] if args else "all"
     d = load_maint()

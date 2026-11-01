@@ -6,7 +6,7 @@ project's test machine). For an overview and install steps see the [README](../R
 A per-user resource governor, developed on a 2019 iMac (iMac19,1: Intel i9-9900K, 16 GB RAM, Radeon Pro 575X
 with 4 GB VRAM, 5K display, macOS 15). It has two parts:
 
-- **`clearx.py`**: a daemon run every 10 s by a LaunchAgent. It runs RAM + VRAM as **one 20 GB
+- **`src/clearx.py`**: a daemon run every 10 s by a LaunchAgent. It runs RAM + VRAM as **one 20 GB
   pool** and acts on it, together with swap, CPU load, thermals and the disk.
 - **ClearX.app**: a native menu-bar app (SwiftUI, about 35 MB RSS, refreshes every 2 s). It
   shows the live numbers and has buttons for every action.
@@ -225,10 +225,10 @@ clearx pause <name>              # matches EVERY process with that name; be spec
 clearx resume all | resume <name>
 clearx pause-pid|resume-pid|bg-pid|fg-pid|quit-pid|throttle-pid|unthrottle-pid <pid>
 clearx off | on                  # off = resume all, remove background QoS, stop throttles
-clearx bench [seconds]           # CSV in bench/: speed limit, load, swap rate, free, VRAM, GPU%
+clearx bench [seconds]           # CSV in benchmarks/: speed limit, load, swap rate, free, VRAM, GPU%
 clearx bench run <label> [--guard-swap 3G] [--guard-avail 500M] -- <command>
                                    # runs a workload, samples every 2 s, aborts it (SIGINT, then SIGTERM)
-                                   # if swap grows > guard or available memory < guard; CSV + JSON in bench/
+                                   # if swap grows > guard or available memory < guard; CSV + JSON in benchmarks/
 clearx optimize [--apply]        # the max-potential checklist (see Maintenance)
 clearx boost [--quit "App, App"] # Speed Up (see above)
 clearx run "<label>" [--slots N] <command…>   # heavy-job queue: big jobs (builds, exports, model runs) wait
@@ -239,7 +239,7 @@ clearx junk                      # READ-ONLY report of reclaimable disk space + 
 
 ## Editing thresholds
 
-Edit `clearx.conf`. It's re-read every tick, so there's nothing to restart. Sections:
+Edit `config/clearx.conf` (or your `config/clearx.local.conf`). It's re-read every tick, so there's nothing to restart. Sections:
 `[levels] [pool] [resume] [predict] [build_guard] [cpu] [modes] [mode.normal|build|studio] [heavy]
 [budgets] [protected] [vram]`. Set `dry_run = true` to watch decisions in the log without any
 signals being sent.
@@ -279,16 +279,16 @@ tmutil removeexclusion ~/Library/Developer/Xcode/DerivedData
 
 ## Tests
 
-`python3 -m unittest discover -s test` runs the unit tests: pool levels and whole ticks on a fake Mac
-(`test/fake_machine.py`), with no real processes or signals. `bench/replay-levels.py` replays the level
+`python3 -m unittest discover -s tests` runs the unit tests: pool levels and whole ticks on a fake Mac
+(`tests/fake_machine.py`), with no real processes or signals. `benchmarks/replay-levels.py` replays the level
 rules over recorded samples.
 
-`bench/selftest.log` (v1), `bench/selftest-v2.log` (v2) and `bench/selftest-v3.log` (v3.1: freezer + wake,
-reserve, interactive builds, storage plan; run `python3 test/selftest-v3.py`) hold real runs. Each test used a config
+`benchmarks/selftest.log` (v1), `benchmarks/selftest-v2.log` (v2) and `benchmarks/selftest-v3.log` (v3.1: freezer + wake,
+reserve, interactive builds, storage plan; run `python3 tests/selftest-v3.py`) hold real runs. Each test used a config
 whose `target_regex` limited clearx to the test processes only:
-- build guard: three fake 600 MB `clang` jobs (`test/hog.c`) under a 1 GB budget
+- build guard: three fake 600 MB `clang` jobs (`tests/hog.c`) under a 1 GB budget
 - predictive: an incompressible hog growing 500 MB/s (clearx went orange and paused it at 500 MB)
-- CPU governor: a 2-thread spinner (`test/spin.c`) was moved to background QoS, then duty-cycled
+- CPU governor: a 2-thread spinner (`tests/spin.c`) was moved to background QoS, then duty-cycled
   to about 75 %, then manually unthrottled
 
 Cost: a calm tick takes about 0.18 s (≈1.6 % of one core every 10 s). Under pressure it reads the

@@ -126,7 +126,7 @@ struct SettingsView: View {
                 }
             }
         }
-        .toggleStyle(.switch).tint(Theme.accent)
+        .toggleStyle(MintSwitch())
         .onAppear { s.load() }
     }
 }

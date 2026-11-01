@@ -10,6 +10,7 @@ let MG_DIR = NSString(string: "~/Developer/ClearX").expandingTildeInPath
 let MG_CLI = MG_DIR + "/clearx"
 let STATE = MG_DIR + "/state/state.json"
 let OFF = MG_DIR + "/state/disabled"
+let MAC_NAME = Host.current().localizedName ?? "Your Mac"  // (once: it can be slow)
 
 // MARK: - system readers
 
@@ -359,7 +360,7 @@ struct Sparkline: View {
             }.stroke(Theme.warn, lineWidth: 1.5)
         }
         .frame(height: 28)
-        .background(RoundedRectangle(cornerRadius: 6).fill(Theme.line.opacity(0.5)))
+        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Theme.track))
     }
 }
 
@@ -368,11 +369,11 @@ struct Bar: View {
     var body: some View {
         GeometryReader { g in
             ZStack(alignment: .leading) {
-                Rectangle().fill(Theme.line)
-                Rectangle().fill(frac > 0.9 ? Theme.bad : frac > 0.7 ? Theme.warn : Theme.accent)
+                Capsule().fill(Theme.track)
+                Capsule().fill(frac > 0.9 ? Theme.bad : frac > 0.7 ? Theme.warn : Theme.accent)
                     .frame(width: g.size.width * CGFloat(min(max(frac, 0), 1)))
             }
-        }.frame(height: 6).cornerRadius(2)
+        }.frame(height: 6)
     }
 }
 
@@ -395,7 +396,7 @@ struct PoolBar: View {
                     .overlay(Rectangle().stroke(Theme.bad, style: StrokeStyle(lineWidth: 1, dash: [2])))
                 Spacer(minLength: 0)
             }
-        }.frame(height: 14).background(Theme.line).clipShape(RoundedRectangle(cornerRadius: 4))
+        }.frame(height: 14).background(Theme.track).clipShape(Capsule())
     }
 }
 
@@ -436,28 +437,52 @@ struct BoostView: View {
                 Button("Quit selected") { m.speedUp(quit: Array(m.quitPick)) }.font(.caption).disabled(m.quitPick.isEmpty)
             }
         }.padding(10).foregroundColor(Theme.text)
-        .background(RoundedRectangle(cornerRadius: 10).fill(Theme.card)).overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.line))
+        .glass(14)
     }
 }
 
-// Black theme: one ground, one card tone, one accent; status colours only where something needs attention.
+// Black theme, macOS 27 style: true-black ground, glass surfaces (a faint white wash, a lit top rim, continuous
+// corners), capsule controls, one mint accent; status colours only where something needs attention.
 enum Theme {
     static let bg = Color.black
-    static let card = Color(red: 0.043, green: 0.043, blue: 0.051)     // #0B0B0D
-    static let line = Color(red: 0.122, green: 0.122, blue: 0.133)     // #1F1F22
+    static let card = Color(red: 0.047, green: 0.051, blue: 0.055)     // #0C0D0E
+    static let line = Color(red: 0.137, green: 0.141, blue: 0.149)     // #232426
+    static let track = Color.white.opacity(0.08)
     static let text = Color(red: 0.949, green: 0.949, blue: 0.949)     // #F2F2F2
     static let sub = Color(red: 0.604, green: 0.604, blue: 0.627)      // #9A9AA0
     static let accent = Color(red: 0.486, green: 0.961, blue: 0.769)   // #7CF5C4
     static let info = Color(red: 0.541, green: 0.706, blue: 1.0)       // #8AB4FF
     static let warn = Color(red: 1.0, green: 0.710, blue: 0.278)       // #FFB547
     static let bad = Color(red: 1.0, green: 0.420, blue: 0.420)        // #FF6B6B
+    static let radius: CGFloat = 18
+}
+
+/// A glass surface: card tone, a faint wash (tinted for the selected/accent case), and a rim lit from above.
+struct Glass: ViewModifier {
+    var radius: CGFloat = Theme.radius, tint: Color = .white, wash: Double = 0.045
+    func body(content: Content) -> some View {
+        let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
+        content
+            .background(shape.fill(tint.opacity(wash)))
+            .background(shape.fill(Theme.card))
+            .overlay(shape.strokeBorder(LinearGradient(colors: [.white.opacity(0.17), .white.opacity(0.04), .white.opacity(0.08)],
+                                                       startPoint: .top, endPoint: .bottom), lineWidth: 1))
+    }
+}
+extension View {
+    func glass(_ radius: CGFloat = Theme.radius, tint: Color = .white, wash: Double = 0.045) -> some View {
+        modifier(Glass(radius: radius, tint: tint, wash: wash))
+    }
 }
 
 struct AccentButton: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
-        configuration.label.font(.system(size: 15, weight: .bold)).foregroundColor(.black)
+        configuration.label.font(.system(size: 15, weight: .semibold)).foregroundColor(.black)
             .frame(maxWidth: .infinity, minHeight: 44)
-            .background(RoundedRectangle(cornerRadius: 12).fill(Theme.accent.opacity(configuration.isPressed ? 0.75 : 1)))
+            .background(Capsule().fill(LinearGradient(colors: [Theme.accent, Theme.accent.opacity(0.82)], startPoint: .top, endPoint: .bottom)))
+            .overlay(Capsule().strokeBorder(Color.white.opacity(0.35), lineWidth: 0.5))
+            .shadow(color: Theme.accent.opacity(configuration.isPressed ? 0.1 : 0.28), radius: 12, y: 2)
+            .scaleEffect(configuration.isPressed ? 0.98 : 1).animation(.easeOut(duration: 0.12), value: configuration.isPressed)
     }
 }
 
@@ -470,8 +495,9 @@ struct GhostLabel: View {
     @Environment(\.isEnabled) var enabled
     var body: some View {
         c.label.font(.system(size: 12, weight: .semibold)).foregroundColor(Theme.text)
-            .padding(.horizontal, 10).padding(.vertical, 5)
-            .background(Capsule().fill(Theme.line.opacity(c.isPressed ? 1 : 0.7)))
+            .padding(.horizontal, 12).padding(.vertical, 5)
+            .background(Capsule().fill(Color.white.opacity(c.isPressed ? 0.16 : 0.09)))
+            .overlay(Capsule().strokeBorder(Color.white.opacity(0.1), lineWidth: 0.5))
             .opacity(enabled ? 1 : 0.4)
     }
 }
@@ -480,9 +506,12 @@ struct ScoreRing: View {
     let score: Int, color: Color
     var body: some View {
         ZStack {
-            Circle().stroke(Theme.line, lineWidth: 8)
+            Circle().stroke(Theme.track, lineWidth: 7)
             Circle().trim(from: 0, to: CGFloat(min(max(score, 0), 100)) / 100)
-                .stroke(color, style: StrokeStyle(lineWidth: 8, lineCap: .round)).rotationEffect(.degrees(-90))
+                .stroke(AngularGradient(colors: [color.opacity(0.55), color], center: .center, startAngle: .degrees(0),
+                                        endAngle: .degrees(360 * Double(min(max(score, 1), 100)) / 100)),
+                        style: StrokeStyle(lineWidth: 7, lineCap: .round)).rotationEffect(.degrees(-90))
+                .shadow(color: color.opacity(0.35), radius: 6)
             Text("\(score)").font(.system(size: 28, weight: .bold, design: .rounded)).foregroundColor(Theme.text)
         }.frame(width: 84, height: 84).animation(.easeOut(duration: 0.6), value: score)
     }
@@ -498,8 +527,9 @@ struct SimpleBar: View {
                 .font(.system(size: 13))
             GeometryReader { g in
                 ZStack(alignment: .leading) {
-                    Capsule().fill(Theme.line)
+                    Capsule().fill(Theme.track)
                     Capsule().fill(color).frame(width: g.size.width * CGFloat(min(max(frac, 0.03), 1)))
+                        .animation(.easeOut(duration: 0.4), value: frac)
                 }
             }.frame(height: 6)
             if !detail.isEmpty { Text(detail).font(.system(size: 11)).foregroundColor(Theme.sub) }
@@ -561,12 +591,12 @@ struct Panel: View {
             HStack {
                 VStack(alignment: .leading, spacing: 1) {
                     Text(greeting).font(.system(size: 11)).foregroundColor(Theme.sub)
-                    Text("Your iMac").font(.system(size: 15, weight: .semibold)).foregroundColor(Theme.text)
+                    Text(MAC_NAME).font(.system(size: 15, weight: .semibold)).foregroundColor(Theme.text)
                 }
                 Spacer()
                 Text(status.0).font(.system(size: 11, weight: .semibold)).foregroundColor(status.1)
                     .padding(.horizontal, 10).padding(.vertical, 4)
-                    .background(Capsule().fill(Theme.card)).overlay(Capsule().stroke(Theme.line))
+                    .glass(12, tint: status.1, wash: 0.12)
             }
             HStack(spacing: 16) {
                 ScoreRing(score: m.health, color: scoreColor)
@@ -577,9 +607,8 @@ struct Panel: View {
                 }
                 Spacer(minLength: 0)
             }
-            .padding(14)
-            .background(RoundedRectangle(cornerRadius: 12).fill(Theme.card))
-            .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.line))
+            .padding(16)
+            .glass(22)
             Button(action: { m.speedUp() }) { Text(m.boosting ? "Speeding up…" : "Speed Up") }
                 .buttonStyle(AccentButton()).disabled(m.boosting || !m.enabled).opacity(m.boosting || !m.enabled ? 0.5 : 1)
             if let b = m.boost { BoostView(m: m, b: b) }
@@ -587,7 +616,7 @@ struct Panel: View {
             ReserveRow(m: m)
             SimpleBar(title: "Memory", frac: Double(m.poolTotal - (m.poolSeg["free"] ?? 0) - (m.poolSeg["cached"] ?? 0)) / Double(m.poolTotal),
                       word: memWord.0, color: memWord.1,
-                      detail: "\(gb(m.availB)) of 16 GB ready for apps right now")
+                      detail: "\(gb(m.availB)) of \(gb(ProcessInfo.processInfo.physicalMemory)) ready for apps right now")
             SimpleBar(title: "Processor", frac: cpuAvg / 100, word: cpuWord.0, color: cpuWord.1,
                       detail: String(format: "%.0f%% busy%@", cpuAvg, m.hotSustained ? " · easing off background work to cool down" : m.speedLimit < 100 ? " · warm, cooling" : ""))
             Button(action: { open(0) }) {
@@ -653,9 +682,8 @@ struct Card<Trailing: View, Content: View>: View {
             }
             content
         }
-        .padding(16).frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 12).fill(Theme.card))
-        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.line))
+        .padding(18).frame(maxWidth: .infinity, alignment: .leading)
+        .glass()
     }
 }
 
@@ -667,7 +695,7 @@ struct PageHeader: View {
     let title: String, sub: String
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(title).font(.system(size: 22, weight: .bold)).foregroundColor(Theme.text)
+            Text(title).font(.system(size: 26, weight: .bold)).foregroundColor(Theme.text)
             Text(sub).font(.system(size: 13)).foregroundColor(Theme.sub).fixedSize(horizontal: false, vertical: true)
         }
     }
@@ -730,8 +758,9 @@ struct OutputCard: View {
 struct DetailsView: View {
     @ObservedObject var m: Model
     @StateObject var mm = MaintModel()
+    var flat = false  // (snapshots: ImageRenderer draws no ScrollView content)
     var body: some View {
-        HStack(spacing: 0) {
+        HStack(alignment: .top, spacing: 0) {
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 8) {
                     Circle().fill(Color(m.color)).frame(width: 8, height: 8)
@@ -740,29 +769,32 @@ struct DetailsView: View {
                 ForEach(DETAIL_TABS, id: \.0) { t, label, icon in
                     let on = m.detailsTab == t
                     Button(action: { m.detailsTab = t }) {
-                        HStack(spacing: 8) { Image(systemName: icon).frame(width: 16); Text(label); Spacer() }
+                        HStack(spacing: 9) {
+                            Image(systemName: icon).frame(width: 18).foregroundColor(on ? Theme.accent : Theme.sub)
+                            Text(label); Spacer()
+                        }
                             .font(.system(size: 13, weight: on ? .semibold : .regular))
                             .foregroundColor(on ? Theme.text : Theme.sub)
                             .padding(.horizontal, 10).padding(.vertical, 8)
-                            .background(RoundedRectangle(cornerRadius: 8).fill(on ? Theme.line : Color.clear))
-                            .contentShape(Rectangle())
+                            .background(Capsule().fill(on ? Theme.accent.opacity(0.13) : Color.clear))
+                            .overlay(Capsule().strokeBorder(on ? Theme.accent.opacity(0.25) : Color.clear, lineWidth: 0.5))
+                            .contentShape(Capsule())
                     }.buttonStyle(.plain)
                 }
                 Spacer()
                 Button("Open settings file") { NSWorkspace.shared.open(URL(fileURLWithPath: MG_DIR + "/clearx.conf")) }
                     .buttonStyle(.plain).font(.system(size: 11)).foregroundColor(Theme.sub).padding(.horizontal, 10)
             }
-            .padding(.vertical, 20).padding(.horizontal, 12)
-            .frame(width: 190).frame(maxHeight: .infinity, alignment: .top)
-            .background(Theme.card)
-            .overlay(Rectangle().fill(Theme.line).frame(width: 1), alignment: .trailing)
-            ScrollView {
-                page.padding(24).frame(maxWidth: .infinity, alignment: .leading)
-            }
+            .padding(.top, 44).padding(.bottom, 16).padding(.horizontal, 10)  // (room for the window buttons, as in macOS 27)
+            .frame(width: 200).frame(maxHeight: .infinity, alignment: .top)
+            .glass(22)
+            .padding(10)
+            if flat { page.padding(24).frame(maxWidth: .infinity, alignment: .leading) }
+            else { ScrollView { page.padding(24).frame(maxWidth: .infinity, alignment: .leading) } }
         }
         .frame(minWidth: 760, minHeight: 640)
         .onAppear { m.visible += 1 }.onDisappear { m.visible = max(0, m.visible - 1) }
-        .background(Theme.bg).foregroundColor(Theme.text).font(.system(size: 12))
+        .background(Theme.bg.ignoresSafeArea()).foregroundColor(Theme.text).font(.system(size: 12))
         .buttonStyle(GhostButton()).tint(Theme.accent).preferredColorScheme(.dark)
     }
 
@@ -1183,6 +1215,23 @@ struct OptimizeView: View {
     }
 }
 
+@MainActor func snapshot(to dir: String) -> Never {
+    let m = Model(); m.visible = 1; m.refresh()
+    func save<V: View>(_ v: V, _ name: String, _ size: CGSize) {
+        let r = ImageRenderer(content: v.frame(width: size.width, height: size.height).environment(\.colorScheme, .dark))
+        r.scale = 2
+        if let img = r.nsImage, let t = img.tiffRepresentation, let b = NSBitmapImageRep(data: t)?.representation(using: .png, properties: [:]) {
+            try? b.write(to: URL(fileURLWithPath: dir + "/" + name + ".png"))
+        }
+    }
+    save(Panel(m: m).fixedSize(), "menu", CGSize(width: 360, height: 820))
+    for (t, label, _) in DETAIL_TABS {
+        m.detailsTab = t
+        save(DetailsView(m: m, flat: true), "details-" + label.replacingOccurrences(of: " ", with: "-"), CGSize(width: 900, height: 1300))
+    }
+    exit(0)
+}
+
 func dotImage(_ c: NSColor) -> NSImage {
     let img = NSImage(size: NSSize(width: 10, height: 10), flipped: false) { r in
         c.setFill(); NSBezierPath(ovalIn: r.insetBy(dx: 1, dy: 1)).fill(); return true
@@ -1194,7 +1243,12 @@ func dotImage(_ c: NSColor) -> NSImage {
 @main
 struct ClearXApp: App {
     @StateObject var m = Model()
-    init() { _ = Freezer.shared }  // start waking frozen apps on activation from launch
+    init() {
+        if let i = CommandLine.arguments.firstIndex(of: "--snapshot"), i + 1 < CommandLine.arguments.count {
+            snapshot(to: CommandLine.arguments[i + 1])  // (design check: PNGs of the menu and every Details page)
+        }
+        _ = Freezer.shared  // start waking frozen apps on activation from launch
+    }
     var body: some Scene {
         MenuBarExtra {
             Panel(m: m)
@@ -1206,6 +1260,7 @@ struct ClearXApp: App {
             }
         }
         .menuBarExtraStyle(.window)
-        Window("ClearX Details", id: "details") { DetailsView(m: m) }
+        Window("ClearX Details", id: "details") { DetailsView(m: m).ignoresSafeArea() }
+            .windowStyle(.hiddenTitleBar)
     }
 }

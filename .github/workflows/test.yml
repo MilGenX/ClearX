@@ -6,7 +6,7 @@ jobs:
   test:
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Daemon unit tests (fake Mac, no real signals)
         run: python3 -m unittest discover -s tests -v
       - name: Menu-bar app builds

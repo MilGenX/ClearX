@@ -6,7 +6,8 @@ import IOKit
 import Darwin
 import UserNotifications
 
-let MG_DIR = NSString(string: "~/Developer/ClearX").expandingTildeInPath
+// the ClearX folder: install.sh records it (defaults write com.user.clearx home <folder>)
+let MG_DIR = UserDefaults.standard.string(forKey: "home") ?? NSString(string: "~/Developer/ClearX").expandingTildeInPath
 let MG_CLI = MG_DIR + "/clearx"
 let STATE = MG_DIR + "/state/state.json"
 let OFF = MG_DIR + "/state/disabled"
@@ -180,7 +181,7 @@ final class Model: ObservableObject {
     // the 20 GB pool from state.json (written by the daemon every tick)
     var poolSeg: [String: UInt64] = [:], poolTotal: UInt64 = 20 << 30, poolWhy: [String] = []
     var spillRate = 0.0, spilling = false, diskFree: UInt64 = 0, diskLat = 0.0, tight = false, xcodeJobs = 0
-    let vramTotal: UInt64 = 4096 << 20
+    var vramTotal: UInt64 = 0  // from the daemon (0 on Macs with unified memory)
     let pageSize = UInt64(vm_kernel_page_size)
     private let coreLoad = CoreLoad(), procs = ProcSampler(), smc = SMC()
     private var lastSwapouts: UInt64 = 0, lastT = Date()
@@ -281,6 +282,7 @@ final class Model: ObservableObject {
             if let p = j["pool"] as? [String: Any] {
                 poolSeg = ((p["seg"] as? [String: Any]) ?? [:]).mapValues { num($0) }
                 poolTotal = max(num(p["total"]), 1)
+                vramTotal = num(p["vram_total"])
                 poolWhy = p["why"] as? [String] ?? []
                 spillRate = (p["spill_rate"] as? NSNumber)?.doubleValue ?? 0
                 spilling = p["spilling"] as? Bool ?? false
@@ -338,6 +340,20 @@ final class Model: ObservableObject {
                        case "yellow": return .systemYellow; default: return .systemGreen }
     }
 }
+
+/// The graphics card's name (the PCI device that reports its own VRAM), e.g. "Radeon Pro 575X"; empty if none.
+let GPU_NAME: String = {
+    var it: io_iterator_t = 0
+    guard IOServiceGetMatchingServices(kIOMainPortDefault, IOServiceMatching("IOPCIDevice"), &it) == KERN_SUCCESS else { return "" }
+    defer { IOObjectRelease(it) }
+    while case let s = IOIteratorNext(it), s != 0 {
+        defer { IOObjectRelease(s) }
+        guard IORegistryEntryCreateCFProperty(s, "VRAM,totalMB" as CFString, nil, 0) != nil,
+              let d = IORegistryEntryCreateCFProperty(s, "model" as CFString, nil, 0)?.takeRetainedValue() as? Data else { continue }
+        return String(decoding: d.prefix { $0 != 0 }, as: UTF8.self).replacingOccurrences(of: "AMD ", with: "")
+    }
+    return ""
+}()
 
 func gb(_ b: UInt64) -> String { String(format: "%.1f GB", Double(b) / 1073741824) }
 /// Disk sizes the way Finder shows them (1 GB = 1,000,000,000 bytes), so the numbers match Finder's.
@@ -782,7 +798,13 @@ struct DetailsView: View {
                     }.buttonStyle(.plain)
                 }
                 Spacer()
-                Button("Open settings file") { NSWorkspace.shared.open(URL(fileURLWithPath: MG_DIR + "/clearx.conf")) }
+                Button("Open settings file") {
+                    let local = MG_DIR + "/clearx.local.conf"  // your own settings (read after clearx.conf)
+                    if !FileManager.default.fileExists(atPath: local) {
+                        try? FileManager.default.copyItem(atPath: MG_DIR + "/clearx.local.conf.example", toPath: local)
+                    }
+                    NSWorkspace.shared.open(URL(fileURLWithPath: FileManager.default.fileExists(atPath: local) ? local : MG_DIR + "/clearx.conf"))
+                }
                     .buttonStyle(.plain).font(.system(size: 11)).foregroundColor(Theme.sub).padding(.horizontal, 10)
             }
             .padding(.top, 44).padding(.bottom, 16).padding(.horizontal, 10)  // (room for the window buttons, as in macOS 27)
@@ -828,7 +850,7 @@ struct DetailsView: View {
                     Text(gb(ready)).font(.system(size: 26, weight: .bold, design: .rounded)).foregroundColor(Theme.text)
                     Text("ready to use").foregroundColor(Theme.sub)
                 }
-                Text("\(gb(m.poolSeg["free"] ?? 0)) unused + \(gb(m.poolSeg["cached"] ?? 0)) cache macOS reuses instantly, out of 16 GB memory + 4 GB graphics memory")
+                Text("\(gb(m.poolSeg["free"] ?? 0)) unused + \(gb(m.poolSeg["cached"] ?? 0)) cache macOS reuses instantly, out of \(gb(ProcessInfo.processInfo.physicalMemory)) memory\(m.vramTotal > 0 ? " + \(gb(m.vramTotal)) graphics memory" : "")")
                     .font(.system(size: 11)).foregroundColor(Theme.sub).fixedSize(horizontal: false, vertical: true)
                 PoolBar(seg: m.poolSeg, total: m.poolTotal, swap: m.swapUsed)
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 4), alignment: .leading, spacing: 6) {
@@ -842,11 +864,11 @@ struct DetailsView: View {
                 }.font(.system(size: 11))
                 Sparkline(values: m.swapHist)
             }
-            Card("Graphics · Radeon Pro 575X") {
+            Card(GPU_NAME.isEmpty ? "Graphics" : "Graphics · " + GPU_NAME) {
                 Text("GPU \(m.gpuUtil)% busy").font(.system(size: 11)).foregroundColor(Theme.sub)
             } content: {
-                SimpleBar(title: "Graphics memory", frac: Double(m.vramUsed) / Double(m.vramTotal),
-                          word: "\(mb(m.vramUsed)) of 4 GB", color: m.spilling ? Theme.bad : Theme.info)
+                SimpleBar(title: "Graphics memory", frac: Double(m.vramUsed) / Double(max(m.vramTotal, 1)),
+                          word: m.vramTotal > 0 ? "\(mb(m.vramUsed)) of \(gb(m.vramTotal))" : "shared with memory", color: m.spilling ? Theme.bad : Theme.info)
                 Text(String(format: "Spilled into memory %@ · %+.1f MB/s%@", mb(m.poolSeg["spill"] ?? 0), m.spillRate, m.spilling ? " · spilling now" : ""))
                     .font(.system(size: 11)).foregroundColor(m.spilling ? Theme.bad : Theme.sub)
                 Text("Disk \(gbd(m.diskFree)) free · saves in \(String(format: "%.1f", m.diskLat)) ms\(m.tight ? " · tight, limits start early" : "") · next Xcode build uses \(m.xcodeJobs) jobs")

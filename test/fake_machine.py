@@ -52,6 +52,7 @@ class FakeMachine:
         fake_sub = types.SimpleNamespace(run=self._run, Popen=self._popen, DEVNULL=-3, STDOUT=-2)
         cx.time, cx.os, cx.subprocess = fake_time, fake_os, fake_sub
         cx.CONF = self.conf
+        cx.LOCAL_CONF = os.path.join(os.path.dirname(os.path.realpath(__file__)), "local.conf")
         cx.OFF_FILE = "/nonexistent/clearx-off"
         cx.log = self.logs.append
         cx.notify = lambda title, msg: self.notes.append(title)

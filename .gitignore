@@ -14,3 +14,4 @@ diagnostics/
 bench/ram-*.csv
 bench/ram-probe
 bench/ram-idle
+clearx.local.conf

@@ -1,10 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Template: install.sh --login-item fills in __HOME__ and copies it to ~/Library/LaunchAgents. -->
 <plist version="1.0">
 <dict>
   <key>Label</key><string>com.user.clearx.menubar</string>
   <key>ProgramArguments</key>
-  <array><string>/usr/bin/open</string><string>-a</string><string>~/Applications/ClearX.app</string></array>
+  <array><string>/usr/bin/open</string><string>-a</string><string>__HOME__/Applications/ClearX.app</string></array>
   <key>RunAtLoad</key><true/>
 </dict>
 </plist>

@@ -1,11 +1,11 @@
 #!/bin/sh
-# Builds ClearX.app (no Xcode project needed) and ad-hoc signs it.
+# Builds ClearX.app for this Mac (Intel or Apple silicon; no Xcode project needed) and ad-hoc signs it.
 set -e
 cd "$(dirname "$0")"
 APP=build/ClearX.app
 rm -rf "$APP"; mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp ClearX.icns "$APP/Contents/Resources/ClearX.icns"
-xcrun swiftc -O -parse-as-library -target x86_64-apple-macos13.0 -o "$APP/Contents/MacOS/ClearX" Sources/*.swift
+xcrun swiftc -O -parse-as-library -target "$(uname -m)-apple-macos13.0" -o "$APP/Contents/MacOS/ClearX" Sources/*.swift
 cat > "$APP/Contents/Info.plist" <<PL
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

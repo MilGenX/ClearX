@@ -11,7 +11,9 @@ let MG_DIR = UserDefaults.standard.string(forKey: "home") ?? NSString(string: "~
 let MG_CLI = MG_DIR + "/clearx"
 let STATE = MG_DIR + "/state/state.json"
 let OFF = MG_DIR + "/state/disabled"
-let MAC_NAME = Host.current().localizedName ?? "Your Mac"  // (once: it can be slow)
+private let HOST_NAME = Host.current().localizedName ?? "Your Mac"  // (once: it can be slow)
+var SNAPSHOT = false  // --snapshot: neutral names, so screenshots carry nothing personal
+var MAC_NAME: String { SNAPSHOT ? "Your Mac" : HOST_NAME }
 
 // MARK: - system readers
 
@@ -523,6 +525,29 @@ extension View {
     }
 }
 
+/// macOS 27-style switch, drawn in SwiftUI: a capsule track that fills mint, with a lit knob.
+struct MintSwitch: ToggleStyle {
+    var small = false
+    func makeBody(configuration: Configuration) -> some View {
+        let w: CGFloat = small ? 30 : 40, h: CGFloat = small ? 18 : 24
+        HStack(spacing: 8) {
+            configuration.label
+            ZStack(alignment: configuration.isOn ? .trailing : .leading) {
+                Capsule().fill(configuration.isOn ? Theme.accent : Theme.track)
+                    .overlay(Capsule().strokeBorder(Color.white.opacity(0.12), lineWidth: 0.5))
+                Circle().fill(configuration.isOn ? Color.black.opacity(0.85) : Color.white.opacity(0.85))
+                    .padding(2).shadow(color: .black.opacity(0.3), radius: 1, y: 1)
+            }
+            .frame(width: w, height: h)
+            .animation(.spring(response: 0.25, dampingFraction: 0.8), value: configuration.isOn)
+            .onTapGesture { configuration.isOn.toggle() }
+        }
+        .accessibilityElement(children: .combine).accessibilityAddTraits(.isButton)
+        .accessibilityValue(configuration.isOn ? "on" : "off")
+        .accessibilityAction { configuration.isOn.toggle() }
+    }
+}
+
 struct AccentButton: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label.font(.system(size: 15, weight: .semibold)).foregroundColor(.black)
@@ -598,7 +623,8 @@ struct Panel: View {
     var greeting: String {
         let h = Calendar.current.component(.hour, from: Date())
         let part = h < 5 ? "Working late" : h < 12 ? "Good morning" : h < 18 ? "Good afternoon" : "Good evening"
-        let first = NSFullUserName().split(separator: " ").first.map(String.init) ?? ""
+        // the first name of whoever is signed in to this Mac (System Settings › Users & Groups)
+        let first = SNAPSHOT ? "" : NSFullUserName().split(separator: " ").first.map(String.init) ?? ""
         return first.isEmpty ? part : "\(part), \(first)"
     }
     var memWord: (String, Color) {
@@ -653,7 +679,7 @@ struct Panel: View {
                 ScoreRing(score: m.health, color: scoreColor)
                     .help(m.healthWhy.isEmpty ? "Nothing is taking points off." : m.healthWhy.joined(separator: "\n"))
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(headline).font(.system(size: 16, weight: .semibold)).foregroundColor(Theme.text)
+                    Text(headline).font(.system(size: 16, weight: .semibold)).foregroundColor(Theme.text).fixedSize(horizontal: false, vertical: true)
                     Text(sentence).font(.system(size: 12)).foregroundColor(Theme.sub).fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer(minLength: 0)
@@ -697,7 +723,7 @@ struct Panel: View {
                 Button("Details…") { open() }.buttonStyle(.plain).foregroundColor(Theme.sub)
                 Spacer()
                 Toggle("On", isOn: Binding(get: { m.enabled }, set: { m.act([$0 ? "on" : "off"]) }))
-                    .toggleStyle(.switch).controlSize(.mini).tint(Theme.accent).foregroundColor(Theme.sub)
+                    .toggleStyle(MintSwitch(small: true)).foregroundColor(Theme.sub)
                 Button("Quit") { NSApp.terminate(nil) }.buttonStyle(.plain).foregroundColor(Theme.sub)
             }
             .font(.system(size: 12))
@@ -1008,7 +1034,7 @@ final class MaintModel: ObservableObject {
     }
     func confirmIOSDev() {
         confirmFix("iosdev", title: "Remove iOS simulators and iPhone debug symbols?",
-                   detail: "Shuts down and deletes every iOS simulator, deletes the simulator runtimes, and moves the iPhone debug symbols to the Trash. Xcode downloads them again if MyApp's iOS work needs them (slowly).")
+                   detail: "Shuts down and deletes every iOS simulator, deletes the simulator runtimes, and moves the iPhone debug symbols to the Trash. Xcode downloads them again if your iOS work needs them (slowly).")
     }
     var junk: [[String: Any]] { j["junk"] as? [[String: Any]] ?? [] }
     var startup: [[String: Any]] { j["startup"] as? [[String: Any]] ?? [] }
@@ -1277,15 +1303,17 @@ struct OptimizeView: View {
 }
 
 @MainActor func snapshot(to dir: String) -> Never {
+    SNAPSHOT = true
     let m = Model(); m.visible = 1; m.refresh()
     func save<V: View>(_ v: V, _ name: String, _ size: CGSize) {
-        let r = ImageRenderer(content: v.frame(width: size.width, height: size.height).environment(\.colorScheme, .dark))
+        let r = ImageRenderer(content: v.frame(width: size.width, height: size.height > 0 ? size.height : nil, alignment: .top)
+            .background(Theme.bg).environment(\.colorScheme, .dark))
         r.scale = 2
         if let img = r.nsImage, let t = img.tiffRepresentation, let b = NSBitmapImageRep(data: t)?.representation(using: .png, properties: [:]) {
             try? b.write(to: URL(fileURLWithPath: dir + "/" + name + ".png"))
         }
     }
-    save(Panel(m: m).fixedSize(), "menu", CGSize(width: 360, height: 820))
+    save(Panel(m: m), "menu", CGSize(width: 360, height: 0))
     for (t, label, _) in DETAIL_TABS {
         m.detailsTab = t
         save(DetailsView(m: m, flat: true), "details-" + label.replacingOccurrences(of: " ", with: "-"), CGSize(width: 900, height: 1300))

@@ -1,0 +1,19 @@
+# Your own ClearX settings. Copy to clearx.local.conf (it's git-ignored) and edit: it's read after clearx.conf,
+# so any key here replaces the same key there. Changes apply on the next tick (every 10 s).
+
+[freezer]
+# apps never frozen (the defaults plus your own)
+never = Finder, Dock, Terminal, iTerm2, Xcode*, ClearX, Activity Monitor, System Settings, Simulator,
+        zoom.us, FaceTime, Music, Logic Pro*, Ableton Live*, MyEditor
+
+[protected]
+# whole apps that are never paused, frozen or slowed, with everything they start (e.g. a local AI app and its server)
+apps = MyApp*
+
+[modes]
+# your audio app: while it's open ClearX keeps everything else out of its way under strain
+studio_apps = Logic Pro X, Logic Pro, Ableton Live*, MyDAW
+
+[queue]
+# your own build scripts, so they wait their turn with Xcode/cmake builds
+scripts = build.sh

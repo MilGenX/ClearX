@@ -69,7 +69,7 @@ Competitors are described as I know them, up to mid-2026. I didn't re-check thei
 | **App Tamer** (St. Clair) | Website (Developer ID) | Nothing direct | Slows/stops background apps' CPU per app. The closest rival |
 | **ClearX** | Not shipped | Acts only under strain: freezes hidden idle apps and wakes them on activation, pauses big background jobs, guards the 3 GB reserve, watches the 4 GB VRAM and its spill into RAM | Pressure-, heat- and build-aware; sets build job counts (Xcode, CMake) |
 
-**Where ClearX is ahead (measured on this iMac, `SLOWNESS.md`):** app switch 225 ms vs 1378 ms with macOS alone
+**Where ClearX is ahead (measured on the test iMac, [MEASUREMENTS.md](MEASUREMENTS.md)):** app switch 225 ms vs 1378 ms with macOS alone
 under the same load. It acts continuously but only under strain (no "purge" button that just refills a cache). It
 is the only tool here that manages builds and graphics memory. It gives back control on its own once the Mac is
 fine.

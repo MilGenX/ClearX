@@ -1,2 +1,4 @@
 #!/bin/sh
-exec /usr/bin/python3 ~/Developer/ClearX/clearx.py "$@"
+# The `clearx` command: runs clearx.py from wherever this folder is (install.sh links it into ~/.local/bin).
+D=$(cd "$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")" && pwd)
+exec /usr/bin/python3 "$D/clearx.py" "$@"

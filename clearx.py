@@ -24,6 +24,8 @@ import configparser, fnmatch, json, os, re, signal, subprocess, sys, time, types
 
 HOME = os.path.dirname(os.path.realpath(__file__))
 CONF = os.environ.get("CLEARX_CONF", os.path.join(HOME, "clearx.conf"))
+# your own settings, read after clearx.conf and never committed (see clearx.local.conf.example)
+LOCAL_CONF = os.environ.get("CLEARX_LOCAL_CONF", os.path.join(HOME, "clearx.local.conf"))
 STATE_DIR = os.environ.get("CLEARX_STATE", os.path.join(HOME, "state"))
 LOG_DIR = os.environ.get("CLEARX_LOGS", os.path.join(HOME, "logs"))
 STATE_FILE = os.path.join(STATE_DIR, "state.json")
@@ -86,8 +88,23 @@ def globs(s):
 def load_conf():
     c = configparser.ConfigParser(interpolation=None)
     c.optionxform = str  # keep case of budget keys
-    c.read(CONF)
+    c.read([CONF, LOCAL_CONF])
     return c
+
+
+_vram_mb = None
+
+
+def vram_total_mb(conf):
+    """[vram] total_mb, or 0/absent = the GPU's own figure (ioreg VRAM,totalMB); 0 on Macs with unified memory."""
+    global _vram_mb
+    v = conf.getint("vram", "total_mb", fallback=0)
+    if v:
+        return v
+    if _vram_mb is None:
+        r = re.search(r'"VRAM,totalMB" = (\d+)', sh("ioreg", "-rc", "IOPCIDevice", "-k", "VRAM,totalMB"))
+        _vram_mb = int(r.group(1)) if r else 0
+    return _vram_mb
 
 
 def load_state():
@@ -508,7 +525,7 @@ def build_roots(procs, conf):
     only carry text: one that merely mentions a script isn't running it, and a real run shows up as its own process."""
     Q = conf["queue"] if conf.has_section("queue") else {}
     tools = globs(Q.get("tools", "xcodebuild, swift-build, cmake, cargo, ninja, make"))
-    scripts = [x.strip() for x in Q.get("scripts", "mydaw-auto-update, myapp.py build, myapp.py install").split(",") if x.strip()]
+    scripts = [x.strip() for x in Q.get("scripts", "").split(",") if x.strip()]
     cand = set()
     for p in procs.values():
         n = p["name"]
@@ -632,7 +649,7 @@ def pool_state(conf, st, m, g, now, swapping_mb):
     P = conf["pool"] if conf.has_section("pool") else {}
     L = conf["levels"]
     ram = int(sh("sysctl", "-n", "hw.memsize").strip() or 16 << 30)
-    vtot = conf.getint("vram", "total_mb", fallback=4096) << 20
+    vtot = vram_total_mb(conf) << 20
     vused = g["used"] if g else 0
     spill = g["sys"] if g else 0
     disk_free, lat = disk_probe()
@@ -686,7 +703,7 @@ def pool_state(conf, st, m, g, now, swapping_mb):
     return dict(state=level, why=why, total=ram + vtot, ram=ram, vram_total=vtot, seg=seg, swap=m["swap"],
                 swap_rate=round(swapping_mb / max(1, now - (hist[-2][0] if len(hist) > 1 else now - 10)), 1),
                 spill_rate=round(spill_rate / (1 << 20), 1), spilling=spilling, swap_active=swap_active,
-                vram_pct=round(100 * vused / vtot, 1), thermal=spd, sched=sched, load=load,
+                vram_pct=round(100 * vused / vtot, 1) if vtot else 0, thermal=spd, sched=sched, load=load,
                 cpu_load=round(100 * load[0] / (os.cpu_count() or 16)), disk_free=disk_free, disk_lat=lat_med,
                 tight=tight, avail=m["avail"])
 
@@ -960,10 +977,9 @@ def _reserve_and_freeze(c):
         ceiling = int(sh("sysctl", "-n", "hw.memsize").strip()) - m["wired"] - m["compressed"] - need
         # which build holds the reserve down (the menu says so calmly instead of a red cross)
         builds = [p for p in procs.values() if is_build(p)]
-        build = "" if not builds else "Building MyDAW" if any("/MyDAW/" in p["path"] or "/MyDAW/" in cmdline(p["pid"])
-                                                           for p in builds[:6]) \
-            else "Building MyApp" if any("/MYAPP/" in p["path"] or "/MYAPP/" in cmdline(p["pid"]) for p in builds[:6]) \
-            else "A build is running"
+        build = "" if not builds else next((f"Building {r.group(1)}" for p in builds[:6]
+                                             for r in [re.search(r"/Developer/([^/\s]+)/", p["path"] + " " + cmdline(p["pid"]))]
+                                             if r), "A build is running")  # the project folder under ~/Developer
         st["reserve"] = dict(target=target, ready=ready, need=need, ceiling=ceiling, ok=ready >= target,
                              reachable=ceiling >= target, build=build)
         stage = st.get("reserve_stage", 0)
@@ -1935,7 +1951,7 @@ def status():
         print(f"{title}: {len(d)}")
         for k, i in d.items():
             print(f"  pid {k:>6} {i['name']:<28} {int((time.time() - i['t']) / 60)} min  ({i['why']})")
-    print(f"config: {CONF}\nlog:    {LOG_FILE}")
+    print(f"config: {CONF}" + (f" + {LOCAL_CONF}" if os.path.exists(LOCAL_CONF) else "") + f"\nlog:    {LOG_FILE}")
 
 
 def pid_action(cmd, pid):

@@ -107,7 +107,7 @@ class Tick(unittest.TestCase):
 
     def test_open_daw_lowers_nothing_while_the_mac_is_fine(self):
         fm = machine()
-        fm.procs[60] = proc(60, "MyDAW", 500 * MB)
+        fm.procs[60] = proc(60, "Logic Pro", 500 * MB)
         fm.procs[70] = proc(70, "Brave Browser", 400 * MB)
         st = fm.tick(cx)
         self.assertEqual(st["mode"], "studio")
@@ -222,8 +222,8 @@ class Tick(unittest.TestCase):
 
     def test_real_build_started_from_a_shell_is_in_line(self):
         fm = self.queue()
-        fm.procs[60] = proc(60, "zsh", 5 * MB, path="/bin/zsh -c python3 tools/myapp.py build")
-        fm.procs[61] = proc(61, "Python", 50 * MB, ppid=60, path="/usr/bin/python3 tools/myapp.py build")
+        fm.procs[60] = proc(60, "zsh", 5 * MB, path="/bin/zsh -c python3 tools/release.py build")
+        fm.procs[61] = proc(61, "Python", 50 * MB, ppid=60, path="/usr/bin/python3 tools/release.py build")
         st = fm.tick(cx)
         self.assertIn(61, [q["pid"] for q in st["build_queue"]])
         self.assertNotIn(60, [q["pid"] for q in st["build_queue"]])

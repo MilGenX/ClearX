@@ -340,8 +340,9 @@ def _ver(plist):
 
 
 INTERPRETERS = {"sh", "bash", "zsh", "python3", "python", "osascript", "perl", "ruby", "node", "open", "env"}
-MINE = ("~/Developer/ClearX/", "~/Developer/MyDAW/", "~/Developer/MYAPP/",
-        "~/Applications/ClearX.app", "~/Library/Application Support/MyAppResign/")
+# your own programs (not flagged for being unsigned): ClearX, anything under ~/Developer, plus CLEARX_MINE (":"-separated)
+MINE = tuple([os.path.dirname(os.path.realpath(__file__)) + "/", HOME + "/Developer/", HOME + "/Applications/ClearX.app"]
+             + [p for p in os.environ.get("CLEARX_MINE", "").split(":") if p])
 
 
 def codesign_info(path):
@@ -754,9 +755,9 @@ def optimize(storage_info=None, apply=False, log=print):
     add("Dev", "Xcode DerivedData location", dd or "default (~/Library/Developer/Xcode/DerivedData, internal SSD)", "ok")
     add("Dev", "Xcode indexing", "disabled" if idx in ("1", "YES") else "on (Xcode pauses it while building)", "ok")
     cc = shutil.which("ccache") or os.path.exists("/usr/local/bin/ccache")
-    add("Dev", "ccache for the MyDAW build", ("installed" if cc else "not set up") + ": skipped on purpose, MyDAW would "
-        "have to switch build systems (Xcode to Ninja) and that's not worth the risk now", "ok" if cc else "info",
-        "brew install ccache; then in MyDAW's build script: cmake -G Ninja -DCMAKE_C_COMPILER_LAUNCHER=ccache "
+    add("Dev", "ccache for C/C++ builds", ("installed" if cc else "not set up") + ": optional; it only helps builds "
+        "that use Ninja or Make (the Xcode generator ignores compiler launchers)", "ok" if cc else "info",
+        "brew install ccache; then: cmake -G Ninja -DCMAKE_C_COMPILER_LAUNCHER=ccache "
         "-DCMAKE_CXX_COMPILER_LAUNCHER=ccache (the Xcode generator ignores compiler launchers)",
         "a rebuild after a pull recompiles only what changed: typically minutes become seconds for JUCE")
     try:
@@ -764,7 +765,7 @@ def optimize(storage_info=None, apply=False, log=print):
             iv = plistlib.load(f).get("StartInterval")
     except OSError:
         iv = None
-    add("Dev", "MyDAW auto-update interval", (f"checks every {iv // 60} min, " if iv else "") + "builds at most every 15 min (Intel only)",
+    if iv: add("Dev", "MyDAW auto-update interval", (f"checks every {iv // 60} min, " if iv else "") + "builds at most every 15 min (Intel only)",
         "ok", "", "each build is the Mac's biggest memory load; commits that land meanwhile go into the next build")
 
     # browser
@@ -789,8 +790,8 @@ def optimize(storage_info=None, apply=False, log=print):
     # spotlight
     add("Spotlight", "mds / mds_stores / mdworker CPU now", f"{_cpu(r'mds|mdworker'):.0f}%",
         "ok" if _cpu(r"mds|mdworker") < 20 else "info",
-        "System Settings > Spotlight > Search Privacy: add ~/Developer/MyDAW/src/build, ~/Developer/MyDAW/auto-src/build, "
-        "~/Developer/MYAPP/build, node_modules folders")
+        "System Settings > Spotlight > Search Privacy: add your projects' build folders "
+        "(build, .build, DerivedData) and node_modules folders")
 
     # network
     route = sh("route", "-n", "get", "default")
@@ -993,8 +994,8 @@ def storage_plan(maint, goal_gb=250):
     ios += int(float(rt.group(1)) * (1 << 30)) if rt else 0
     if ios >= 1 << 30:
         add("iosdev", "iOS simulators and iPhone debug symbols (Xcode)", ios,
-            "Only if you no longer test MyApp on the iOS simulator: Xcode › Settings › Platforms › delete old iOS runtimes.",
-            "fix:iosdev", "MyApp's iOS work uses these; they download again when needed (slowly).")
+            "Only if you no longer test on the iOS simulator: Xcode › Settings › Platforms › delete old iOS runtimes.",
+            "fix:iosdev", "iOS simulator work uses these; they download again when needed (slowly).")
     for p, title, how in ((HOME + "/Library/Application Support/Autodesk", "Autodesk app data",
                            "If you no longer use Autodesk apps, uninstall them with Clean up › Uninstall."),
                           (HOME + "/.cache/codex-runtimes", "Codex runtimes cache", "Safe to remove; re-downloaded when used."),

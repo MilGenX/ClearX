@@ -7,7 +7,9 @@ Don't open a public issue. You'll get a reply within a few days.
 
 ## What ClearX can and can't do
 
-ClearX runs as your own user, with no admin rights, and never opens a network connection.
+ClearX runs as your own user, with no admin rights. The background service never uses the network. Only the
+Checks report does: it asks macOS for pending updates (`softwareupdate -l`) and times one DNS lookup (your DNS server
+and 1.1.1.1) to compare speed. Nothing about you or your Mac is sent anywhere.
 
 - It sends signals (`SIGSTOP`, `SIGCONT`, `SIGTERM`) and changes priority only for processes that belong to you. It
   refuses macOS's own processes (`/System`, `/usr`, `/bin`, `/sbin`, `/Library/Apple`) and your protected list, and it

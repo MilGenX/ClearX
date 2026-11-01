@@ -675,6 +675,24 @@ def _rss(pattern):
     return tot, n
 
 
+def _pids(pattern):
+    return [ln.split(None, 1)[0] for ln in sh("ps", "-axo", "pid=,comm=").splitlines()
+            if len(ln.split(None, 1)) == 2 and re.search(pattern, ln.split(None, 1)[1])]
+
+
+def _vm_owners():
+    """Which app runs each Virtualization.framework VM, from the disk images it has open (the VM's own
+    process is an Apple XPC service, so its name and parent say nothing)."""
+    known = (("/Application Support/Claude/vm_bundles/", "Claude's sandbox"), ("com.docker.docker", "Docker Desktop"),
+             ("com.utmapp.UTM", "UTM"), ("/Parallels/", "Parallels"), ("/.colima/", "Colima"), ("/.lima/", "Lima"),
+             ("/.orbstack/", "OrbStack"), ("/.tart/", "Tart"), ("/Podman/", "Podman"))
+    out = []
+    for pid in _pids(r"com\.apple\.Virtualization\.VirtualMachine$"):
+        names = [ln[1:] for ln in sh("lsof", "-Fn", "-p", pid).splitlines() if ln.startswith("n/")]
+        out.append(next((app for key, app in known if any(key in f for f in names)), "unknown app"))
+    return out
+
+
 def _cpu(pattern):
     return sum(float(ln.split(None, 1)[0]) for ln in sh("ps", "-axo", "%cpu=,comm=").splitlines()
                if len(ln.split(None, 1)) == 2 and re.search(pattern, ln.split(None, 1)[1]))
@@ -735,10 +753,16 @@ def optimize(storage_info=None, apply=False, log=print):
     add("Background", "Homebrew services running", ", ".join(started) or "none", "ok" if not started else "info",
         "brew services stop <name>")
     vm, n = _rss(r"com\.apple\.Virtualization\.VirtualMachine")
-    add("Background", "Virtual machines", f"{n} running, {human(vm)}" + (" (Claude's sandbox: fine, no cap needed)"
-        if n == 1 and vm < 1536 << 20 else ""), "ok" if not n or vm < 1536 << 20 else "needs OK",
-        "cap the VM's memory in its app (e.g. 2 GB for a Linux VM; Docker Desktop: Settings > Resources)",
-        "each GB capped is a GB the pool keeps")
+    owners = _vm_owners()
+    big = n and vm >= 1536 << 20
+    claude = owners and all(o == "Claude's sandbox" for o in owners)
+    add("Background", "Virtual machines", f"{n} running, {human(vm)}" + (f": {', '.join(sorted(set(owners)))}" if owners else ""),
+        "ok" if not big else "needs OK",
+        "Claude's own Linux sandbox (Cowork tasks run in it, and it holds the folders you shared with them). "
+        "When no Cowork task is running, quit Claude (Cmd-Q) and reopen it, or end it with "
+        f"kill {' '.join(_pids(r'com.apple.Virtualization.VirtualMachine$'))}; Claude starts it again when a task needs it"
+        if claude else "cap the VM's memory in its app (e.g. 2 GB for a Linux VM; Docker Desktop: Settings > Resources)",
+        "frees the VM's memory until it starts again" if claude else "each GB capped is a GB the pool keeps")
     nd, n1 = _rss(r"(^|/)node$")
     py, n2 = _rss(r"(^|/)[Pp]ython[0-9.]*$")
     owners = {}

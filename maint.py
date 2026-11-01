@@ -834,7 +834,7 @@ def optimize(storage_info=None, apply=False, log=print):
     sizes = re.findall(r"Size: (\S+ \S+)", mem)
     spd = (re.search(r"Speed: (\S+ MHz)", mem) or [None, "?"])[1]
     vs = sh("vm_stat")
-    so = int((re.search(r"Swapouts:\s+(\d+)", vs) or [0, 0])[1]) * 4096
+    so = int((re.search(r"Swapouts:\s+(\d+)", vs) or [0, 0])[1]) * int((re.search(r"page size of (\d+)", vs) or [0, 4096])[1])
     days = max(0.01, (time.time() - boot_t) / 86400)
     w, r = ssd_write_read()
     swap_w = so
@@ -842,7 +842,7 @@ def optimize(storage_info=None, apply=False, log=print):
     add("Storage", "Drive writes since boot (what wears an SSD; reads don't)",
         f"{human(w)} written in {days * 24:.1f} h, {human(swap_w)} of it swap; {human(r)} read (no wear)",
         "info" if rate < 100 << 30 else "applied",
-        "", f"ClearX cuts the writes: 2 compile jobs while you work, apps frozen only while the compressor has room, "
+        "", f"ClearX cuts the writes: fewer compile jobs only while memory is short, apps frozen only while the compressor has room, "
         "Brave disk cache capped at 300 MB. " + (lambda wr_: (
             f"The drive itself reports {wr_['wear_pct']}% of its life used after {human(wr_['lifetime_written'])} written "
             f"(about {human(wr_.get('endurance', 0))} in total); at {human(rate)}/day the rest lasts "

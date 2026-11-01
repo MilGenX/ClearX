@@ -169,6 +169,9 @@ def metrics():
     except ValueError:
         m["pressure"] = 1
     vs = sh("vm_stat")
+    global PAGE
+    ps = re.search(r"page size of (\d+)", vs)  # 4096 on Intel, 16384 on Apple silicon
+    PAGE = int(ps.group(1)) if ps else PAGE
 
     def pg(k):
         r = re.search(k + r":\s+(\d+)", vs)
@@ -441,6 +444,8 @@ def pause(p, st, dry, why, kind="pressure"):
     if not dry:
         try:
             os.kill(p["pid"], signal.SIGSTOP)
+        except ProcessLookupError:
+            return False  # it ended between the process list and the pause: nothing to do
         except OSError as e:
             log(f"pause failed pid={p['pid']} {p['name']}: {e}")
             return False
@@ -593,8 +598,12 @@ def detect_mode(conf, procs, st):
         return "studio"
     build_tools = globs(conf.get("modes", "build_tools", fallback=""))
     compilers = globs(conf.get("build_guard", "compilers", fallback=""))
-    if any(matches(n, build_tools) for n in names) and sum(matches(n, compilers) for n in names) >= 1:
-        return "build"
+    if any(matches(n, build_tools) for n in names):
+        # compilers come and go between files: hold build mode 60 s after the last one so it doesn't flip every tick
+        if any(matches(n, compilers) for n in names):
+            st["compiler_seen"] = time.time()
+        if time.time() - st.get("compiler_seen", 0) < 60:
+            return "build"
     return "normal"
 
 

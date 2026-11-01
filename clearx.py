@@ -13,6 +13,7 @@ Usage:
   clearx bench [seconds]   (CSV snapshot: speed limit, load, swap rate, VRAM, GPU%)
   clearx bench run <label> [--guard-swap 3G] [--guard-avail 500M] [--max-seconds N] -- <command>   (workload benchmark)
   clearx off | on
+  clearx settings | set <section.key> <value>   the settings the app shows; set writes clearx.local.conf
   clearx maintain [all|scan|clean <cat,...>|large|startup|disable <label>|enable <label>
                      |uninstall <App> [--vendor com.x] [--apply]|updates|security|health|storage|optimize]
   clearx run "<label>" [--slots N] <command...>   heavy-job queue: one (or N) at a time, low priority
@@ -394,10 +395,10 @@ def protected_set(conf):
 
 def eligible(procs, conf, st, include_paused=False):
     prot = protected_set(conf)
-    # [protected] apps: the app and everything it starts (MyApp: its node server, voice ID, tunnel)
+    # [protected] apps: the app and everything it starts (e.g. a local AI app: its server, helpers, tunnel)
     apps = globs(conf.get("protected", "apps", fallback=""))
     ptree = tree(procs, [p["pid"] for p in procs.values() if matches(p["name"], apps)]) if apps else set()
-    # build tests (MyDAW's audio timing tests): a paused test fails, and a failed test keeps the update out
+    # build tests (e.g. audio timing tests): a paused test fails, and a failed test keeps the update out
     ptree |= tree(procs, [p["pid"] for p in procs.values()
                           if matches(p["name"], globs(conf.get("interactive", "tests", fallback="ctest, *_tests")))])
     rx = conf.get("test", "target_regex", fallback="").strip()
@@ -457,7 +458,7 @@ def unbackground(pid, st, why, dry=False):
 
 def pause(p, st, dry, why, kind="pressure"):
     if p["name"].startswith("com.apple.WebKit.") and why != "manual":
-        return False  # XPC helpers of MyApp/Safari: freezing them blanks pages (renice/QoS still fine)
+        return False  # XPC helpers of web views (Safari and apps): freezing them blanks pages (renice/QoS still fine)
     if not dry:
         try:
             os.kill(p["pid"], signal.SIGSTOP)
@@ -500,7 +501,7 @@ def resume_all(st, why):
 
 # ---------- build queue: one project builds/installs at a time ----------
 def queue_skipped(procs, conf):
-    """Builds that never wait in line ([queue] skip: X 2026-10-28, "and the queue": MyDAW's updates go in right away):
+    """Builds that never wait in line ([queue] skip: e.g. an auto-updater that must go in right away):
     each matching script and everything under it, shells included (its cmake, xcodebuild, ctest)."""
     Q = conf["queue"] if conf.has_section("queue") else {}
     skip = [x.strip() for x in Q.get("skip", "").split(",") if x.strip()]
@@ -520,7 +521,7 @@ def queue_skipped(procs, conf):
 
 
 def build_roots(procs, conf):
-    """Top-level build jobs, one per project run: MyDAW's auto-update script, `myapp.py build|install`, and any
+    """Top-level build jobs, one per project run: your [queue] scripts and any
     xcodebuild / swift build / cmake / cargo / ninja / make not started by another of these. `zsh -c` and `python -c`
     only carry text: one that merely mentions a script isn't running it, and a real run shows up as its own process."""
     Q = conf["queue"] if conf.has_section("queue") else {}
@@ -574,8 +575,8 @@ def queue_tick(conf, st, procs, fg, dry, strained=True):
     active = set(active + order[:1])
     if not strained:  # memory to spare: builds run side by side, as they would without ClearX
         active = set(order)
-    # MyDAW's updater testing (its ctest, under a build that skips the line): its timing tests miss beside another
-    # build (X 2026-10-28: MyApp's tests next to MyDAW's player test failed it twice), so every other build waits meanwhile.
+    # a skipped build's tests (its ctest, under a build that skips the line): timing tests miss beside another
+    # build (measured: another project's tests next to an audio player test failed it twice), so every other build waits.
     skipped = queue_skipped(procs, conf)
     if any(procs[p]["name"] == "ctest" for p in skipped if p in procs):
         active = set()
@@ -588,7 +589,7 @@ def queue_tick(conf, st, procs, fg, dry, strained=True):
         resume(pid, st, "build queue: its turn", dry=dry)
     for pid in sorted(held_by_q - set(procs)):
         st["paused"].pop(str(pid), None)
-    # a project's own "stuck run" timer must not count time spent waiting in line (MyDAW kills runs > 30 min)
+    # a project's own "stuck run" timer must not count time spent waiting in line (some kill runs > 30 min)
     if any(r not in active for r in order):
         for f in [x.strip() for x in Q.get("keep_fresh", "").split(",") if x.strip()]:
             try:
@@ -602,7 +603,7 @@ def queue_tick(conf, st, procs, fg, dry, strained=True):
             p = procs[pid]
             if pid in fg or pid in tests or "T" in p["stat"] or "Z" in p["stat"] or str(pid) in st.get("paused", {}):
                 continue
-            if " --test" in cmdline(pid):  # (a test run already going finishes: MyApp's node --test)
+            if " --test" in cmdline(pid):  # (a test run already going finishes, e.g. node --test)
                 continue
             pause(p, st, dry, f"build queue: waits for {procs[order[0]]['name']} (pid {order[0]})", kind="queue")
 
@@ -715,7 +716,7 @@ def set_xcode_jobs(n, st, dry, why):
     if not dry:
         subprocess.run(["defaults", "write", "com.apple.dt.Xcode", "IDEBuildOperationMaxNumberOfConcurrentCompileTasks",
                         "-int", str(n)], capture_output=True)
-        # cmake --build (incl. MyDAW's auto-update) and make started from launchd/Finder/Terminal get the same cap
+        # cmake --build (incl. auto-updaters) and make started from launchd/Finder/Terminal get the same cap
         subprocess.run(["launchctl", "setenv", "CMAKE_BUILD_PARALLEL_LEVEL", str(n)], capture_output=True)
         subprocess.run(["launchctl", "setenv", "MAKEFLAGS", f"-j{n}"], capture_output=True)
         st["xcode_jobs"] = n
@@ -783,7 +784,7 @@ def freeze_tick(conf, st, procs, lvl, fpid, daws, compilers, now, dry, reserve_s
         return 0
     idle_s = float(F.get("idle_min", 5)) * 60 if reserve_stage < 4 else float(F.get("recent_min", 1)) * 60
     min_mem = size(F.get("min_mem", "300M"))
-    # [protected] apps (MyApp: its server, voice ID and phone tunnel must keep answering) are never frozen either
+    # [protected] apps (their servers and tunnels must keep answering) are never frozen either
     never = globs(F.get("never", "")) + protected_set(conf) + daws + compilers + globs(conf.get("protected", "apps", fallback=""))
     renderer_only = globs(F.get("renderer_only", "Brave Browser, Google Chrome"))
     held = assertion_pids()
@@ -1116,11 +1117,12 @@ def _interactive(c, want):
             want = min(want, int(I.get("active_jobs", 4)))
             if stage >= 1:  # reserve short while you work: the next build step gets 1 job (never SIGSTOP: a
                 want = 1    # stopped compiler keeps its RAM and it gets swapped out, i.e. SSD writes)
-            bp = globs(I.get("build_paths", "/auto-src/, /.worktrees/builder/"))
-            auto = [p["pid"] for p in procs.values() if "mydaw-auto-update" in p["path"] or any(x in p["path"] for x in bp) or
-                    (p["name"] in ("zsh", "bash", "sh") and "mydaw-auto-update" in cmdline(p["pid"]))] \
-                if any(p["name"] in ("zsh", "bash", "sh") for p in procs.values()) else []
-            updater = tree(procs, auto)  # MyDAW's auto-update build, from the moment it starts
+            bp = globs(I.get("build_paths", ""))
+            sc = globs(I.get("auto_scripts", ""))  # automatic build scripts, e.g. a nightly auto-update
+            auto = [p["pid"] for p in procs.values() if any(x in p["path"] for x in bp + sc) or
+                    (p["name"] in ("zsh", "bash", "sh") and any(x in cmdline(p["pid"]) for x in sc))] \
+                if any(p["name"] in ("zsh", "bash", "sh") for p in procs.values()) or bp else []
+            updater = tree(procs, auto)  # the automatic build, from the moment it starts
             # its tests are timing tests (audio): at background QoS they run 3x slower and fail, and a failed test
             # keeps the update out. Shells neither: what they start later (the tests) would inherit background QoS.
             tests = tree(procs, [p["pid"] for p in procs.values() if matches(p["name"], globs(I.get("tests", "ctest, *_tests")))])
@@ -1142,7 +1144,7 @@ def _interactive(c, want):
                     if pid in fg or "T" in p["stat"] or str(pid) in held or p["name"] in SHELLS and pid not in auto:
                         continue
                     pause(p, st, dry, "hold: auto-builder while you use the Mac", kind="hold")
-            # local AI servers (MyApp's llama-server): never paused, but while you work in another app they run at
+            # local AI servers (llama-server, ollama): never paused, but while you work in another app they run at
             # background QoS so the app in front stays snappy; full speed when their app is in front or you're away
             ai = [p for p in procs.values() if matches(p["name"], globs(I.get("ai_servers", "llama-server, ollama*")))]
             owner_front = fpid in procs and matches(procs[fpid]["name"], globs(conf.get("protected", "apps", fallback="")))
@@ -1194,7 +1196,7 @@ def _mode_priorities(c):
     """Studio and build modes lower the apps competing with them."""
     conf, st, dry, mode, lvl, bgc = c.conf, c.st, c.dry, c.mode, c.lvl, c.bgc
     # mode: the DAW's and the build's competition step back only when the Mac is strained (memory short or macOS lowering
-    # the CPU speed). With MyDAW merely open it lowered every Python script and Brave all the time, the bench's own 14 MB
+    # the CPU speed). With a DAW merely open it lowered every Python script and Brave all the time, the bench's own 14 MB
     # script included (process start p95 46-104 ms vs 5 ms off, 2026-10-31); CoreAudio's own threads outrank them anyway.
     if (mode == "studio" and c.strained) or (mode == "build" and lvl >= 1):
         for p in bgc:
@@ -1240,7 +1242,7 @@ def _pressure(c):
                 renice(p, dry, f"level {level}")
                 background(p, st, dry, f"level {level}")
     pausable = [p for p in pausable if str(p["pid"]) not in st.get("paused", {})]
-    # you're away: the big background job is the work now (MyApp's trainer only runs then). Pausing it at orange only
+    # you're away: the big background job is the work now (e.g. an AI trainer that only runs then). Pausing it at orange only
     # had macOS swap it out, the pool turn green because of that, and the job swap back in on resume: 78 rounds of
     # ~7 GB each way in two days. It stays at background QoS instead; red still pauses (swap death protection).
     if lvl == 2 and pausable and not c.away:
@@ -1705,7 +1707,7 @@ def boost(quit_names=None, as_json=False):
         for label, info in st.get("agent_rss", {}).items():
             pr = procs.get(info["pid"])
             pl = os.path.expanduser(f"~/Library/LaunchAgents/{label}.plist")
-            if not pr or label.startswith(("com.user.clearx", "com.mydaw.")) or not os.path.exists(pl):
+            if not pr or label.startswith(tuple(["com.user.clearx"] + globs(conf.get("protected", "agents", fallback="")))) or not os.path.exists(pl):
                 continue
             try:
                 with open(pl, "rb") as f:
@@ -1954,6 +1956,33 @@ def status():
     print(f"config: {CONF}" + (f" + {LOCAL_CONF}" if os.path.exists(LOCAL_CONF) else "") + f"\nlog:    {LOG_FILE}")
 
 
+# what the app's Settings page can change (everything else: clearx.local.conf by hand)
+SETTINGS = [("general", "notify"), ("reserve", "target"), ("freezer", "enabled"), ("freezer", "never"),
+            ("protected", "apps"), ("modes", "studio_apps"), ("interactive", "enabled"), ("queue", "scripts")]
+
+
+def set_local(key, value):
+    """Writes one setting into clearx.local.conf (keeping the rest of that file's settings)."""
+    sec, _, k = key.partition(".")
+    if (sec, k) not in SETTINGS:
+        print(f"unknown setting {key}; one of: " + ", ".join(f"{s}.{k}" for s, k in SETTINGS))
+        return 1
+    value = value.replace("\n", " ").strip()
+    c = configparser.ConfigParser(interpolation=None)
+    c.optionxform = str
+    c.read(LOCAL_CONF)
+    if not c.has_section(sec):
+        c.add_section(sec)
+    c.set(sec, k, value)
+    tmp = LOCAL_CONF + ".tmp"
+    with open(tmp, "w") as f:
+        f.write("# Your own ClearX settings (read after clearx.conf; not tracked by git). The app's Settings page writes here.\n\n")
+        c.write(f)
+    os.replace(tmp, LOCAL_CONF)
+    print(f"{key} = {value}")
+    return 0
+
+
 def pid_action(cmd, pid):
     st, conf = load_state(), load_conf()
     procs = proc_list()
@@ -1963,6 +1992,10 @@ def pid_action(cmd, pid):
         return 1
     if p and cmd in ("pause-pid", "quit-pid", "bg-pid", "throttle-pid") and matches(p["name"], protected_set(conf)):
         print(f"{p['name']} is protected")
+        return 1
+    if p and cmd in ("pause-pid", "quit-pid", "bg-pid", "throttle-pid") and \
+            p["path"].startswith(("/System/", "/usr/", "/bin/", "/sbin/", "/Library/Apple/")):
+        print(f"{p['name']} is part of macOS: ClearX leaves it alone")
         return 1
     if cmd == "pause-pid":
         pause(p, st, False, "manual")
@@ -2020,6 +2053,11 @@ def main(argv):
         return boost([x.strip() for x in q.split(",") if x.strip()] if q else None, as_json="--json" in argv)
     elif cmd == "optimize":
         return maintain(["optimize"] + argv[2:])
+    elif cmd == "settings":
+        conf = load_conf()
+        print(json.dumps({f"{s}.{k}": " ".join(conf.get(s, k, fallback="").split()) for s, k in SETTINGS}))
+    elif cmd == "set" and len(argv) > 3:
+        return set_local(argv[2], " ".join(argv[3:]))
     elif cmd == "bench" and len(argv) > 3 and argv[2] == "run":
         # clearx bench run <label> [--guard-swap 3G] [--guard-avail 500M] -- <shell command>
         a = argv[3:]

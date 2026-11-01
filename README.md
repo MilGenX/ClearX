@@ -62,8 +62,9 @@ These are single runs on one Mac. Treat differences under about 20 % as noise.
   idle apps (they ask to save first).
 - **Maintenance and storage.** It shows a health score, storage cleanup with sizes, login-item and security checks,
   and a full report of every limit on your Mac (`clearx optimize`).
-- **Native menu-bar app.** Built in SwiftUI, with a black theme and glass surfaces. With its windows closed, it
-  refreshes only every 10 seconds.
+- **Native menu-bar app.** Built in SwiftUI, with a black theme and glass surfaces, a first-run welcome, a Settings
+  page and VoiceOver labels. It shows apps by name, and macOS's own processes are marked and can't be paused. With
+  its windows closed, it refreshes only every 10 seconds.
 
 ## Safety
 
@@ -122,8 +123,9 @@ The full list is in [docs/REFERENCE.md](docs/REFERENCE.md#commands).
 
 ## Configure
 
-`clearx.conf` holds the shared defaults, with every option explained. Put your own changes in
-**`clearx.local.conf`**. Start from [`clearx.local.conf.example`](clearx.local.conf.example), or use **Open
+The **Settings** page in the app covers the common choices: the memory to keep ready, the App Freezer, apps to
+never touch, your audio apps and your build scripts. Everything else is in `clearx.conf`, which holds the shared
+defaults with every option explained. Put your own changes in **`clearx.local.conf`**. Start from [`clearx.local.conf.example`](clearx.local.conf.example), or use **Open
 settings file** in the app. It's read after the defaults, isn't tracked by git, and applies on the next tick. Common
 changes:
 
@@ -190,7 +192,7 @@ Issues and pull requests are welcome. Please include `clearx status` output and 
 
 - A Swift daemon inside the app (no Python), then signed and notarized Developer ID releases
 - Testing on Apple silicon
-- First-run onboarding and settings in the app
+- Every setting in the app (today the common ones are, the rest are in a text file)
 
 ## License
 

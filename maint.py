@@ -7,6 +7,15 @@ Results are cached in state/maint.json for the menu-bar app.
 import glob, json, os, plistlib, re, shutil, subprocess, time
 
 HOME = os.path.expanduser("~")
+
+
+def setting(section, key, default=""):
+    """A value from clearx.conf, overridden by clearx.local.conf (same files the daemon reads)."""
+    import configparser
+    d = os.path.dirname(os.path.realpath(__file__))
+    c = configparser.ConfigParser(interpolation=None)
+    c.read([os.environ.get("CLEARX_CONF", d + "/clearx.conf"), os.environ.get("CLEARX_LOCAL_CONF", d + "/clearx.local.conf")])
+    return c.get(section, key, fallback=default)
 TRASH = os.path.join(HOME, ".Trash")
 DAY = 86400
 # folders under ~/Library/Caches that a category below already counts, or that must not be moved
@@ -451,7 +460,7 @@ def health(st, maint):
     up = maint.get("updates") or {}
     n = len(up.get("macos", [])) + len(up.get("brew", []))
     if n:
-        p = min(10, 2 * n + (5 if up.get("macos") else 0)); score -= p; why.append(f"{n} updates pending (-{p})")
+        p = min(10, 2 * n + (5 if up.get("macos") else 0)); score -= p; why.append(f"{n} update{'s' if n != 1 else ''} pending (-{p})")
     sec = maint.get("security") or {}
     p = 0
     if sec:
@@ -736,8 +745,9 @@ def optimize(storage_info=None, apply=False, log=print):
     for ln in sh("ps", "-axo", "comm=").splitlines():  # who runs them: decided by where the program lives
         c = ln.strip()
         if re.search(r"(^|/)(node|[Pp]ython[0-9.]*)$", c):
-            o = "MyApp app" if "/MyApp.app/" in c else "MyApp builder" if "/MYAPP/" in c else \
-                "Claude" if "Claude" in c or "/.claude/" in c else "ClearX" if "ClearX" in c else "other"
+            app = re.search(r"/([^/]+)\.app/", c)
+            proj = re.search(r"/Developer/([^/]+)/", c)
+            o = "ClearX" if "ClearX" in c else app.group(1) if app else f"{proj.group(1)} project" if proj else "other"
             owners[o] = owners.get(o, 0) + 1
     add("Background", "node / python processes", f"node {n1} ({human(nd)}), python {n2} ({human(py)}): " +
         ", ".join(f"{k} {v}" for k, v in sorted(owners.items(), key=lambda kv: -kv[1])),
@@ -759,14 +769,7 @@ def optimize(storage_info=None, apply=False, log=print):
         "that use Ninja or Make (the Xcode generator ignores compiler launchers)", "ok" if cc else "info",
         "brew install ccache; then: cmake -G Ninja -DCMAKE_C_COMPILER_LAUNCHER=ccache "
         "-DCMAKE_CXX_COMPILER_LAUNCHER=ccache (the Xcode generator ignores compiler launchers)",
-        "a rebuild after a pull recompiles only what changed: typically minutes become seconds for JUCE")
-    try:
-        with open(HOME + "/Library/LaunchAgents/com.mydaw.auto-update.plist", "rb") as f:
-            iv = plistlib.load(f).get("StartInterval")
-    except OSError:
-        iv = None
-    if iv: add("Dev", "MyDAW auto-update interval", (f"checks every {iv // 60} min, " if iv else "") + "builds at most every 15 min (Intel only)",
-        "ok", "", "each build is the Mac's biggest memory load; commits that land meanwhile go into the next build")
+        "a rebuild after a pull recompiles only what changed: typically minutes become seconds for large C++ projects")
 
     # browser
     bdir = HOME + "/Library/Application Support/BraveSoftware/Brave-Browser"
@@ -799,7 +802,7 @@ def optimize(storage_info=None, apply=False, log=print):
     ports = sh("networksetup", "-listallhardwareports")
     port = (re.search(rf"Hardware Port: ([^\n]+)\nDevice: {re.escape(iface)}\n", ports) or [None, iface])[1]
     add("Network", "Default route", f"{port} ({iface})", "ok" if "Ethernet" in port else "info",
-        "Ethernet is lower latency and doesn't share airtime with the Wi-Fi of your other devices")
+        "Ethernet is lower latency and doesn't share airtime with the Wi-Fi with your other devices")
     cur, cf = _dns_ms(), _dns_ms("1.1.1.1")
     add("Network", "DNS lookup time (uncached)", f"current {cur} ms, 1.1.1.1 {cf} ms",
         "needs OK" if cur and cf and cf < cur * 0.7 else "ok",
@@ -972,23 +975,22 @@ def storage_plan(maint, goal_gb=250):
     items = []
     add = lambda id_, title, size, how, action, note="": items.append(
         dict(id=id_, title=title, size=size, how=how, action=action, note=note))
+    keep = [k.strip() for k in setting("storage", "keep_local").split(",") if k.strip()]
     for acct in glob.glob(HOME + "/Library/CloudStorage/GoogleDrive-*"):
-        # one level inside each shared folder: MyDAW reads "MyDAW Library" straight from Drive (its library roots and
-        # the Media screen), so that folder is never suggested; old archives next to it are
+        # one level inside each shared folder; folders named in [storage] keep_local (ones an app reads straight from
+        # Drive) are never suggested, nor anything that holds them; old archives next to them are
         for top in glob.glob(acct + "/.shortcut-targets-by-id/*/*") + glob.glob(acct + "/My Drive"):
             for sub in sorted(glob.glob(top + "/*")) or [top]:
-                # never MyDAW Library, anything inside it (the shared folder itself can be MyDAW Library), or a folder
-                # that holds it
-                if not os.path.isdir(sub) or "MyDAW Library" in sub.split("/") or \
-                        glob.glob(glob.escape(sub) + "/MyDAW Library") or glob.glob(glob.escape(sub) + "/*/MyDAW Library"):
+                if not os.path.isdir(sub) or any(k in sub.split("/") or glob.glob(glob.escape(sub) + "/" + glob.escape(k))
+                                                  or glob.glob(glob.escape(sub) + "/*/" + glob.escape(k)) for k in keep):
                     continue
                 sz = du(sub)
                 if sz >= 1 << 30:
                     add("drive:" + sub, f"Google Drive “{os.path.basename(sub)}” is downloaded on this Mac", sz,
                         "In Finder, right-click the folder › Remove download. It stays in Google Drive and downloads "
                         "again if opened.", "reveal:" + sub,
-                        "MyDAW scans your Drive for songs; this folder stays listed (as cloud files), only its local "
-                        "copy goes." if ".shortcut-targets-by-id" in sub else "")
+                        "It stays listed in Finder (as cloud files); only its local copy goes."
+                        if ".shortcut-targets-by-id" in sub else "")
     ios = du(HOME + "/Library/Developer/CoreSimulator/Devices") + du(HOME + "/Library/Developer/Xcode/iOS DeviceSupport")
     rt = re.search(r"Total Disk Images: \d+ \(([\d.]+)G\)", sh("xcrun", "simctl", "runtime", "list", timeout=60))
     ios += int(float(rt.group(1)) * (1 << 30)) if rt else 0

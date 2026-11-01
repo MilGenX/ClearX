@@ -20,6 +20,26 @@ struct ProcInfo: Identifiable {
     let name: String
     let mem: UInt64      // phys footprint
     var cpu: Double      // % of one core
+    var label = ""       // what to show: the app's own name where there is one
+    var system = false   // part of macOS (or ClearX itself): shown, never offered to pause or slow
+    var display: String { label.isEmpty ? name : label }
+}
+
+/// Friendly name and kind for a process, from its program's path: "Brave Browser" for its helpers' bundle, the
+/// framework or bundle name for reverse-DNS service names (com.apple.Virtualization.VirtualMachine -> Virtualization),
+/// and system = anything macOS ships (/System, /usr, /bin, /sbin, /Library/Apple) plus ClearX itself.
+func describe(pid: Int32, name: String) -> (label: String, system: Bool) {
+    var buf = [CChar](repeating: 0, count: 4096)
+    let path = proc_pidpath(pid, &buf, UInt32(buf.count)) > 0 ? String(cString: buf) : ""
+    let system = pid == getpid() || ["/System/", "/usr/", "/bin/", "/sbin/", "/Library/Apple/", "/private/var/db/"]
+        .contains { path.hasPrefix($0) } || path.isEmpty && pid < 200
+    if let app = NSRunningApplication(processIdentifier: pid)?.localizedName, !app.isEmpty { return (app, system) }
+    let parts = path.split(separator: "/").map(String.init)
+    let bundle = parts.first { $0.hasSuffix(".app") || $0.hasSuffix(".framework") }.map { ($0 as NSString).deletingPathExtension }
+    let reverseDNS = name.split(separator: ".").count >= 3 && !name.contains(" ")
+    if reverseDNS, let b = bundle { return (b, system) }
+    if let b = bundle, !name.hasPrefix(b), parts.contains(where: { $0.hasSuffix(".app") }) { return ("\(name) (\(b))", system) }
+    return ("", system)
 }
 
 func sysctlInt(_ name: String) -> Int {
@@ -65,6 +85,7 @@ final class CoreLoad {
 
 final class ProcSampler {
     var lastCPU: [Int32: (UInt64, Double)] = [:]
+    private var kinds: [Int32: (name: String, label: String, system: Bool)] = [:]  // (paths don't change: once per process)
     var tb = mach_timebase_info_data_t()
     init() { mach_timebase_info(&tb) }
     func sample() -> [ProcInfo] {
@@ -97,7 +118,18 @@ final class ProcSampler {
             out.append(ProcInfo(id: pid, name: name, mem: ru.ri_phys_footprint, cpu: cpu))
         }
         lastCPU = seen
+        kinds = kinds.filter { seen[$0.key] != nil }
         return out
+    }
+
+    /// Labels only the rows that get shown (looking up every process each refresh would cost more than it shows).
+    func label(_ ps: [ProcInfo]) -> [ProcInfo] {
+        ps.map { p in
+            var q = p
+            if kinds[p.id]?.name != p.name { let d = describe(pid: p.id, name: p.name); kinds[p.id] = (p.name, d.label, d.system) }
+            q.label = kinds[p.id]!.label; q.system = kinds[p.id]!.system
+            return q
+        }
     }
 }
 
@@ -243,8 +275,8 @@ final class Model: ObservableObject {
         if let g = gpuStats() { vramUsed = g.used; gpuUtil = g.util }
         cores = coreLoad.sample()
         let all = procs.sample()
-        topMem = Array(all.sorted { $0.mem > $1.mem }.prefix(8))
-        topCPU = Array(all.sorted { $0.cpu > $1.cpu }.prefix(6))
+        topMem = procs.label(Array(all.sorted { $0.mem > $1.mem }.prefix(8)))
+        topCPU = procs.label(Array(all.sorted { $0.cpu > $1.cpu }.prefix(6)))
         temp = smc?.cpuTemp()
         if let d = try? Data(contentsOf: URL(fileURLWithPath: MG_DIR + "/state/maint.json")),
            let j = try? JSONSerialization.jsonObject(with: d) as? [String: Any], let h = j["health"] as? [String: Any] {
@@ -530,6 +562,7 @@ struct ScoreRing: View {
                 .shadow(color: color.opacity(0.35), radius: 6)
             Text("\(score)").font(.system(size: 28, weight: .bold, design: .rounded)).foregroundColor(Theme.text)
         }.frame(width: 84, height: 84).animation(.easeOut(duration: 0.6), value: score)
+        .accessibilityElement(children: .ignore).accessibilityLabel("Health score").accessibilityValue("\(score) of 100")
     }
 }
 
@@ -550,6 +583,8 @@ struct SimpleBar: View {
             }.frame(height: 6)
             if !detail.isEmpty { Text(detail).font(.system(size: 11)).foregroundColor(Theme.sub) }
         }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(title): \(word)").accessibilityValue(detail)
     }
 }
 
@@ -628,6 +663,7 @@ struct Panel: View {
             Button(action: { m.speedUp() }) { Text(m.boosting ? "Speeding up…" : "Speed Up") }
                 .buttonStyle(AccentButton()).disabled(m.boosting || !m.enabled).opacity(m.boosting || !m.enabled ? 0.5 : 1)
             if let b = m.boost { BoostView(m: m, b: b) }
+            WelcomeCard(openSettings: { open(4) })
             FrozenRow()
             ReserveRow(m: m)
             SimpleBar(title: "Memory", frac: Double(m.poolTotal - (m.poolSeg["free"] ?? 0) - (m.poolSeg["cached"] ?? 0)) / Double(m.poolTotal),
@@ -678,7 +714,8 @@ struct Panel: View {
 // Everything else lives here: live numbers, processes, cleanup, storage, optimize, security.
 // Details window: sidebar + one page at a time, every section in a card.
 let DETAIL_TABS: [(Int, String, String)] = [(1, "Right now", "waveform.path.ecg"), (0, "Storage", "internaldrive"),
-                                            (2, "Clean up", "sparkles"), (3, "Checks", "checkmark.shield")]
+                                            (2, "Clean up", "sparkles"), (3, "Checks", "checkmark.shield"),
+                                            (4, "Settings", "gearshape")]
 
 struct Card<Trailing: View, Content: View>: View {
     let title: String
@@ -719,14 +756,19 @@ struct PageHeader: View {
 
 // One line in a list: name, a number, then its buttons.
 struct ProcRow<Actions: View>: View {
-    let name: String, value: String
+    let name: String, value: String, system: Bool
     let actions: Actions
-    init(name: String, value: String, @ViewBuilder actions: () -> Actions) {
-        self.name = name; self.value = value; self.actions = actions()
+    init(name: String, value: String, system: Bool = false, @ViewBuilder actions: () -> Actions) {
+        self.name = name; self.value = value; self.system = system; self.actions = actions()
     }
     var body: some View {
         HStack(spacing: 8) {
-            Text(name).lineLimit(1).truncationMode(.middle).foregroundColor(Theme.text)
+            Text(name).lineLimit(1).truncationMode(.middle).foregroundColor(Theme.text).help(name)
+            if system {
+                Text("macOS").font(.system(size: 10, weight: .semibold)).foregroundColor(Theme.sub)
+                    .padding(.horizontal, 6).padding(.vertical, 1).background(Capsule().fill(Theme.track))
+                    .help("Part of macOS or ClearX: shown for information, never paused or slowed")
+            }
             Spacer()
             Text(value).monospacedDigit().foregroundColor(Theme.sub)
             actions
@@ -798,14 +840,6 @@ struct DetailsView: View {
                     }.buttonStyle(.plain)
                 }
                 Spacer()
-                Button("Open settings file") {
-                    let local = MG_DIR + "/clearx.local.conf"  // your own settings (read after clearx.conf)
-                    if !FileManager.default.fileExists(atPath: local) {
-                        try? FileManager.default.copyItem(atPath: MG_DIR + "/clearx.local.conf.example", toPath: local)
-                    }
-                    NSWorkspace.shared.open(URL(fileURLWithPath: FileManager.default.fileExists(atPath: local) ? local : MG_DIR + "/clearx.conf"))
-                }
-                    .buttonStyle(.plain).font(.system(size: 11)).foregroundColor(Theme.sub).padding(.horizontal, 10)
             }
             .padding(.top, 44).padding(.bottom, 16).padding(.horizontal, 10)  // (room for the window buttons, as in macOS 27)
             .frame(width: 200).frame(maxHeight: .infinity, alignment: .top)
@@ -825,6 +859,7 @@ struct DetailsView: View {
         case 0: StoragePage(m: m, mm: mm)
         case 2: CleanupView(mm: mm)
         case 3: ChecksView(mm: mm)
+        case 4: SettingsView(m: m)
         default: monitor
         }
     }
@@ -889,8 +924,10 @@ struct DetailsView: View {
                     }
                 }
                 ForEach(m.topCPU) { p in
-                    ProcRow(name: p.name, value: String(format: "%.0f%%", p.cpu)) {
-                        if m.throttled.contains(p.id) {
+                    ProcRow(name: p.display, value: String(format: "%.0f%%", p.cpu), system: p.system) {
+                        if p.system {
+                            EmptyView()
+                        } else if m.throttled.contains(p.id) {
                             Button("Full speed") { m.act(["unthrottle-pid", "\(p.id)"]) }
                         } else {
                             Button("Slow down") { m.act(["throttle-pid", "\(p.id)"]) }
@@ -900,16 +937,18 @@ struct DetailsView: View {
             }
             Card("Apps using the most memory") {
                 ForEach(m.topMem) { p in
-                    ProcRow(name: p.name, value: mb(p.mem)) {
-                        if m.paused.contains(where: { $0.pid == "\(p.id)" }) {
-                            Button("Resume") { m.act(["resume-pid", "\(p.id)"]) }
-                        } else {
-                            Button("Pause") { m.act(["pause-pid", "\(p.id)"]) }
+                    ProcRow(name: p.display, value: mb(p.mem), system: p.system) {
+                        if !p.system {
+                            if m.paused.contains(where: { $0.pid == "\(p.id)" }) {
+                                Button("Resume") { m.act(["resume-pid", "\(p.id)"]) }
+                            } else {
+                                Button("Pause") { m.act(["pause-pid", "\(p.id)"]) }
+                            }
+                            Button(m.bg.contains(p.id) ? "Foreground" : "Background") {
+                                m.act([m.bg.contains(p.id) ? "fg-pid" : "bg-pid", "\(p.id)"])
+                            }
+                            Button("Quit") { m.act(["quit-pid", "\(p.id)"]) }
                         }
-                        Button(m.bg.contains(p.id) ? "Foreground" : "Background") {
-                            m.act([m.bg.contains(p.id) ? "fg-pid" : "bg-pid", "\(p.id)"])
-                        }
-                        Button("Quit") { m.act(["quit-pid", "\(p.id)"]) }
                     }
                 }
             }
@@ -1280,6 +1319,8 @@ struct ClearXApp: App {
                 if m.level != "green" { Image(nsImage: dotImage(m.color)) }
                 Text(String(format: "%.1fG", Double(m.availB) / 1073741824))
             }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(String(format: "ClearX, %.1f gigabytes ready, memory %@", Double(m.availB) / 1073741824, m.level))
         }
         .menuBarExtraStyle(.window)
         Window("ClearX Details", id: "details") { DetailsView(m: m).ignoresSafeArea() }

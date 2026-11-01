@@ -3,7 +3,7 @@
 How every part of ClearX works, its thresholds and its commands, as built and measured on a 2019 iMac (the
 project's test machine). For an overview and install steps see the [README](../README.md).
 
-A per-user resource governor for this iMac (iMac19,1: Intel i9-9900K, 16 GB RAM, Radeon Pro 575X
+A per-user resource governor, developed on a 2019 iMac (iMac19,1: Intel i9-9900K, 16 GB RAM, Radeon Pro 575X
 with 4 GB VRAM, 5K display, macOS 15). It has two parts:
 
 - **`clearx.py`**: a daemon run every 10 s by a LaunchAgent. It runs RAM + VRAM as **one 20 GB
@@ -135,16 +135,15 @@ Trash). Its root helper needs your password: `sudo ~/Developer/ClearX/remove-cle
   daemon wakes everything when the pool is green and the reserve is met, when the freezer is off, or if
   ClearX.app isn't running. `clearx wake [all|<app>]`, or tap "Frozen: N apps" in the menu.
 - **Interactive-aware builds** (`[interactive]`). While you're using the Mac (keyboard/mouse in the last
-  60 s), compile jobs and the whole MyDAW auto-update tree (build and tests) run at background QoS and the next
+  60 s), compile jobs and automatic builders (`build_paths`, `auto_scripts`, with their tests) run at background QoS and the next
   build gets at most 4 jobs. After 2 min without input, they get full speed again.
 - **Build caps at the source.** With the Xcode cap, clearx also sets `CMAKE_BUILD_PARALLEL_LEVEL` and
   `MAKEFLAGS=-jN` in the launchd environment (`launchctl setenv`), so `cmake --build` and `make` started from
-  launchd agents (like MyDAW's auto-update), Finder or new Terminal windows follow the same 4/4/2 cap.
+  launchd agents (like an auto-updater), Finder or new Terminal windows follow the same 4/4/2 cap.
   `clearx off` and `uninstall.sh` unset them.
 - **Other user-level settings** (all removed by `uninstall.sh`): Brave `MemorySaverModeSavings = 2` (maximum)
   and `BackgroundModeEnabled = false` (Brave doesn't keep running after its last window closes); check
-  `brave://policy` to confirm Brave lists them. `NSAppSleepDisabled = YES` for MyDAW (`com.mydaw.app`), so App
-  Nap never throttles it. Speed Up also shuts down booted iOS simulators when no build or test is running.
+  `brave://policy` to confirm Brave lists them. Speed Up also shuts down booted iOS simulators when no build or test is running.
 - **Storage goal**: `clearx maintain plan 250` (and the Storage page) works out what it would take to have
   250 GB free, item by item, with one button each. Nothing is deleted from there.
 
@@ -164,14 +163,14 @@ Trash). Its root helper needs your password: `sudo ~/Developer/ClearX/remove-cle
   logged, never touched.
 - **Thermal.** clearx reads `pmset -g therm` every tick (see the pool table for what it does).
   The app also shows the CPU temperature from the SMC (no root needed).
-- **One mode: Max.** There's nothing to pick. clearx detects by itself when a DAW (MyDAW, Logic,
+- **One mode: Max.** There's nothing to pick. clearx detects by itself when a DAW (Logic,
   Ableton …) or a build (xcodebuild, SWBBuildService, ninja, make, cargo + compilers) is running, and
   that only changes priorities: with a DAW open, Brave, Google Drive, node, Python and VMs are kept at
   background QoS, per-app budgets are halved and the compiler budget is 3 GB; during a build, Brave is
   backgrounded while the pool is yellow or worse.
 - **Safety nets.** Anything paused longer than 15 min (60 min for build-guard jobs) is always
   resumed, with a notification. pid reuse is checked before any signal.
-- **Protected list.** WindowServer, Finder, Dock, loginwindow, kernel_task, Claude*, Xcode (the
+- **Protected list.** WindowServer, Finder, Dock, loginwindow, kernel_task, Xcode (the
   app, not its compilers), Terminal, ClearX, Spotlight/mds and other system UI processes. Add
   your own on `[protected] user =`.
 

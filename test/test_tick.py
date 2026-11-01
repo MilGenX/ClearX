@@ -214,7 +214,7 @@ class Tick(unittest.TestCase):
     def test_shell_that_only_mentions_a_build_is_not_in_line(self):
         fm = self.queue()
         fm.procs.pop(70)
-        fm.procs[60] = proc(60, "zsh", 5 * MB, path="/bin/zsh -c grep 'myapp.py build' notes.txt")
+        fm.procs[60] = proc(60, "zsh", 5 * MB, path="/bin/zsh -c grep 'release.py build' notes.txt")
         fm.procs[61] = proc(61, "sleep", MB, ppid=60, path="/bin/sleep")
         st = fm.tick(cx)
         self.assertEqual([q["pid"] for q in st["build_queue"]], [80])

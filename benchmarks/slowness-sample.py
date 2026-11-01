@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """15-minute evidence sampler for "everything feels slow". Every 10 s: memory pressure %, swap in/out,
 compressor, CPU speed limit, load, GPU %, disk bytes (IOKit), per-process CPU time and disk I/O
-(proc_pid_rusage, own processes), short-lived process churn by name. Writes bench/slowness-<time>.json.
-  python3 bench/slowness-sample.py [seconds]"""
+(proc_pid_rusage, own processes), short-lived process churn by name. Writes benchmarks/slowness-<time>.json.
+  python3 benchmarks/slowness-sample.py [seconds]"""
 import collections, ctypes, json, os, re, subprocess, sys, time
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "src"))
 import clearx as mg  # noqa: E402
 lib = ctypes.CDLL("/usr/lib/libproc.dylib")
 

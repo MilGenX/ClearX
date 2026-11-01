@@ -39,7 +39,7 @@ UserNotifications, which removes the entitlement and the permission prompt.
 
 1. **The daemon is Python and uses the system `python3`.** That's the Xcode Command Line Tools stub. On a Mac
    without them, the first run shows an install dialog and ClearX doesn't run. Notarization doesn't cover scripts.
-   Fix: port `clearx.py` (about 2,100 lines, standard library only) to Swift. It becomes a login-item agent inside
+   Fix: port `src/clearx.py` (about 2,100 lines, standard library only) to Swift. It becomes a login-item agent inside
    the app, registered with `SMAppService.agent(plistName:)`. This is the big job: roughly the size of the app
    itself. Bundling a Python runtime is the quicker alternative, but it's heavier and still has to be signed.
 2. **State lives in the cloned folder.** `install.sh` works from any folder and tells the app where it is. A signed

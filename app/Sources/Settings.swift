@@ -118,9 +118,9 @@ struct SettingsView: View {
                 if let t = s.saved { Label(t, systemImage: "checkmark.circle.fill").font(.system(size: 11)).foregroundColor(Theme.accent) }
                 Spacer()
                 Button("Advanced settings file") {
-                    let local = MG_DIR + "/clearx.local.conf"
+                    let local = MG_DIR + "/config/clearx.local.conf"
                     if !FileManager.default.fileExists(atPath: local) {
-                        try? FileManager.default.copyItem(atPath: MG_DIR + "/clearx.local.conf.example", toPath: local)
+                        try? FileManager.default.copyItem(atPath: MG_DIR + "/config/clearx.local.conf.example", toPath: local)
                     }
                     NSWorkspace.shared.open(URL(fileURLWithPath: local))
                 }

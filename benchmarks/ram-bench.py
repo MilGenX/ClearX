@@ -4,12 +4,12 @@
   off      ClearX off: macOS on its own
   cleaner  ClearX off plus what memory-cleaner apps do without admin rights (allocate and touch memory so macOS drops
            its caches) whenever free memory is under 1 GB, at most once a minute
-Stand-ins (bench/ram-probe.c): the app you're using (1 GB, a tenth of it touched every second, so every page every
+Stand-ins (benchmarks/ram-probe.c): the app you're using (1 GB, a tenth of it touched every second, so every page every
 10 s: a slow pass is that app stalling), and 4 hidden apps (400 MB each, one "switched to" every 20 s: how long until it's all back in RAM).
 Also measured: the background job's progress (CPU time of llama-finetune-lora or of a build), swap in/out, SSD writes
 and how long starting a tiny program takes. The app-in-use stand-in is in [protected] user for the run (ClearX treats
 the app in front the same way), so ClearX never lowers or pauses it; the hidden ones are fair game.
-  bench/ram-bench.py <on|off|cleaner> [seconds=300] [label]
+  benchmarks/ram-bench.py <on|off|cleaner> [seconds=300] [label]
 """
 import importlib.util, json, os, signal, subprocess, sys, time
 

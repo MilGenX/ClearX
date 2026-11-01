@@ -2,12 +2,12 @@
 """20-app test (clearx ON): open ~20 of your own apps + Brave tabs, let it settle, measure memory, CPU and
 how fast each app comes to the front. Pass 2 repeats while a clean CMake build runs (--build-dir).
 Quits only the apps this test opened (politely; they were freshly opened with no documents).
-  python3 bench/apps-test.py [--build-dir <cmake build dir>] [--settle 300]
+  python3 benchmarks/apps-test.py [--build-dir <cmake build dir>] [--settle 300]
 """
 import json, os, re, signal, subprocess, sys, time
 
 D = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
-sys.path.insert(0, D)
+sys.path.insert(0, os.path.join(D, "src"))
 import clearx as mg  # noqa: E402
 
 APPS = ["Brave Browser", "Xcode", "Music", "Mail", "Messages", "Notes", "Calendar", "Reminders",

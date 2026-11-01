@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Replays the pool level rules over recorded bench/slowness-*.json samples: the old rules (allocated swap while
+"""Replays the pool level rules over recorded benchmarks/slowness-*.json samples: the old rules (allocated swap while
 swapping) next to the current ones. Samples have no macOS pressure level or free memory, so pressure counts as normal,
 the old low-free rule can't fire (old counts are a minimum) and "ready" (free + cache) stands in for available.
-  python3 bench/replay-levels.py [--swap-gb N] [files...]    N: pretend this much swap stays allocated, as it does now
+  python3 benchmarks/replay-levels.py [--swap-gb N] [files...]    N: pretend this much swap stays allocated, as it does now
 """
 import collections, glob, json, os, sys
 GB = 1 << 30

@@ -12,7 +12,7 @@ HOME = os.path.expanduser("~")
 def setting(section, key, default=""):
     """A value from clearx.conf, overridden by clearx.local.conf (same files the daemon reads)."""
     import configparser
-    d = os.path.dirname(os.path.realpath(__file__))
+    d = os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "config")
     c = configparser.ConfigParser(interpolation=None)
     c.read([os.environ.get("CLEARX_CONF", d + "/clearx.conf"), os.environ.get("CLEARX_LOCAL_CONF", d + "/clearx.local.conf")])
     return c.get(section, key, fallback=default)
@@ -350,7 +350,7 @@ def _ver(plist):
 
 INTERPRETERS = {"sh", "bash", "zsh", "python3", "python", "osascript", "perl", "ruby", "node", "open", "env"}
 # your own programs (not flagged for being unsigned): ClearX, anything under ~/Developer, plus CLEARX_MINE (":"-separated)
-MINE = tuple([os.path.dirname(os.path.realpath(__file__)) + "/", HOME + "/Developer/", HOME + "/Applications/ClearX.app"]
+MINE = tuple([os.path.dirname(os.path.dirname(os.path.realpath(__file__))) + "/", HOME + "/Developer/", HOME + "/Applications/ClearX.app"]
              + [p for p in os.environ.get("CLEARX_MINE", "").split(":") if p])
 
 

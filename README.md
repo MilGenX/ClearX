@@ -1,200 +1,263 @@
 # ClearX
 
-**A memory manager for macOS that keeps the app you're using fast, and stays out of the way when your Mac is fine.**
-
 [![tests](https://github.com/MilGenX/ClearX/actions/workflows/test.yml/badge.svg)](https://github.com/MilGenX/ClearX/actions/workflows/test.yml)
 ![macOS 13+](https://img.shields.io/badge/macOS-13%2B-black)
+![Intel and Apple silicon](https://img.shields.io/badge/Intel%20%7C%20Apple%20silicon-supported-black)
 ![License: MIT](https://img.shields.io/badge/license-MIT-7CF5C4)
+
+**ClearX is an open-source memory and performance manager for macOS.** When your Mac runs short of memory, gets hot
+or its disk slows down, ClearX decides which work can wait, so the app you're using stays responsive. When your Mac
+is fine, it does nothing at all.
+
+It runs as a small per-user background service with a native menu-bar app. Every 10 seconds it reads memory
+pressure, swap activity, graphics memory (VRAM), CPU heat throttling and disk latency. It acts only when one of them
+says the Mac is strained:
+
+- it **freezes hidden apps** you haven't used for a while, and wakes them in about a millisecond when you switch back;
+- it moves **builds, AI models and batch jobs** to background priority while you're at the keyboard;
+- it **sizes parallel builds** (Xcode, CMake, Make, Cargo) to the memory actually free, and runs them one at a time;
+- it keeps a **memory reserve** ready, so opening something new doesn't stall.
+
+Everything it does is undone automatically once the Mac recovers. It never kills a process, never touches macOS's own
+processes, and needs no admin rights.
 
 Created by **[MilGenX](https://github.com/MilGenX)**.
 
-<p align="center">
-  <img src="docs/images/menu.png" width="300" alt="ClearX menu: health score, Speed Up, memory, processor and storage">
-  &nbsp;&nbsp;
-  <img src="docs/images/details.png" width="500" alt="ClearX Details: memory pool, graphics memory, processor and top apps">
-</p>
+---
 
-Most "memory cleaners" purge caches that macOS refills seconds later. ClearX does something different. It decides
-**who waits** when memory, heat or the disk run short. What you're using goes first. Hidden idle apps, background
-builds and batch jobs step back, and they come back the moment you need them.
+## Contents
 
-## Why it's different
+- [Why ClearX](#why-clearx)
+- [Measured results](#measured-results)
+- [Features](#features)
+- [Requirements](#requirements)
+- [Install](#install)
+- [Using ClearX](#using-clearx)
+- [Configuration](#configuration)
+- [Safety](#safety)
+- [How it works](#how-it-works)
+- [Repository layout](#repository-layout)
+- [Development](#development)
+- [Screenshots](#screenshots)
+- [Roadmap](#roadmap)
+- [License](#license)
 
-| | macOS alone | Typical "RAM cleaner" | **ClearX** |
+## Why ClearX
+
+Most "RAM cleaners" purge the file cache, and macOS fills it again within seconds. macOS's own memory management
+(compression, swap, App Nap) treats every process the same: the app you're typing in and a background build can wait
+for the disk equally long.
+
+ClearX takes a different approach. It doesn't try to create memory. It decides **who waits** when there isn't
+enough:
+
+| | macOS alone | Typical RAM cleaner | ClearX |
 |---|---|---|---|
-| When it acts | Always (compressor, swap) | When you click | **Only under strain**: memory, heat or a slow disk |
-| What it does | Compresses and swaps whatever is coldest | Purges caches (macOS refills them) | **Freezes hidden idle apps, backgrounds big jobs, keeps a RAM reserve** |
-| Getting an app back | Pages it back in from swap | Same | **Wakes it in about 1 ms on Cmd-Tab, Dock or click** |
-| Builds (Xcode, CMake, Cargo…) | No special handling | No | **Sets job counts from free memory, queues builds, caps hot compilers** |
-| Graphics memory (VRAM) | Hidden | Hidden | **Run as one pool with RAM; GPU spill into RAM is tracked** |
-| On a healthy Mac | — | Purges anyway | **Does nothing.** Builds and apps run at full speed |
+| When it acts | Always (compression, swap) | When you click | Only under strain: memory, heat or a slow disk |
+| What it does | Compresses and swaps whatever is coldest | Purges caches that macOS refills | Freezes hidden idle apps, backgrounds heavy jobs, keeps a reserve |
+| Returning to an app | Pages it back in from swap | Same | Wakes a frozen app in about 1 ms on Cmd-Tab, Dock or click |
+| Builds | No special handling | No | Sets job counts from free memory, queues builds, caps hot compilers |
+| Graphics memory | Not shown | Not shown | Run as one pool with RAM; GPU spill into RAM is tracked |
+| On a healthy Mac | — | Purges anyway | Does nothing |
 
-### Measured (2019 iMac, 16 GB RAM, Intel i9, details in [docs/MEASUREMENTS.md](docs/MEASUREMENTS.md))
+## Measured results
 
-With a heavy background job (an AI fine-tune) filling memory:
+On a 2019 iMac (Intel i9, 16 GB RAM), with a large AI fine-tune filling memory in the background:
 
-| | macOS alone | Cleaner method (purge) | **ClearX** |
+| | macOS alone | Purge-style cleaner | **ClearX** |
 |---|---|---|---|
-| Switching back to a hidden app (median) | 1378 ms | 1141 ms | **225 ms** (6× faster) |
-| Background job's progress | 100 % | 100 % | **80 %** (it yields only while you work) |
-| SSD writes in the run | 28.4 GB | 28.6 GB | **20.6 GB** |
+| Switching back to a hidden app (median) | 1378 ms | 1141 ms | **225 ms** |
+| Background job's progress | 100 % | 100 % | 80 % (it yields only while you work) |
+| SSD writes during the run | 28.4 GB | 28.6 GB | **20.6 GB** |
 
-Builds with memory to spare: **as fast as without ClearX** (120 and 114 objects with it, 111 without, within noise).
-These are single runs on one Mac. Treat differences under about 20 % as noise.
+With memory to spare, builds ran **as fast as without ClearX**: 120 and 114 objects in two runs with it, 111 without.
+These are single runs on one Mac, so treat differences under about 20 % as noise. Method, raw results and more tests
+are in [docs/MEASUREMENTS.md](docs/MEASUREMENTS.md).
 
 ## Features
 
-- **Memory pool controller.** RAM and VRAM run as one pool with green, yellow, orange and red levels, set from swap
-  rate, available memory, GPU spill, heat and disk latency. Every 10 seconds it does the least that fixes the
-  problem.
-- **App Freezer.** Under strain, a hidden app that has been idle for 5 minutes and uses over 300 MB is paused, so it
-  stops using CPU and memory churn. It wakes the instant you switch to it. It never freezes the app in front, apps
-  playing audio or downloading, a DAW, or anything on your never-list.
-- **RAM reserve.** It keeps 3 GB ready to use (you can change this), so opening something new doesn't stall.
-- **Build-aware.** It sets Xcode's and CMake's parallel job count from free memory. It runs one build at a time
-  across projects. It caps compiler memory and heat only when needed. While you're at the Mac, automatic builders run
-  at background priority.
-- **Studio mode.** When an audio app (Logic, Ableton, REAPER and others) is open and the Mac is strained, everything
-  else gets out of its way.
+**Memory**
+- **Pool controller.** RAM and VRAM run as one pool with green, yellow, orange and red levels, set from swap rate,
+  available memory, GPU spill, heat and disk latency. ClearX always takes the smallest step that fixes the problem.
+- **App Freezer.** Under strain, a hidden app that has been idle for 5 minutes and uses over 300 MB is paused. It wakes
+  the instant you switch to it. Apps in front, apps playing audio or downloading, audio workstations and anything on
+  your never-list are never frozen.
+- **Memory reserve.** It keeps 3 GB ready to use by default.
+- **Predictive.** It watches how fast available memory is falling and acts before swap starts, not after.
+
+**Work and builds**
+- **Build-aware.** It sets Xcode's and CMake's parallel job count from free memory, and caps compiler memory and heat
+  only when needed.
+- **Build queue.** Builds from different projects run one at a time instead of fighting over memory.
+- **Interactive priority.** While you're at the keyboard, automatic builders and local AI servers run at background
+  priority. They get full speed when you step away.
+- **Studio mode.** With an audio app open (Logic, Ableton, REAPER and others), everything else gets out of its way
+  under strain.
 - **Heat-aware.** It reads macOS's CPU speed limit. While the Mac is heat-throttling and you're using it, it caps
   parallel compiles.
-- **Speed Up.** One click does real, measured actions: it compares before and after, and offers to politely quit
-  idle apps (they ask to save first).
-- **Maintenance and storage.** It shows a health score, storage cleanup with sizes, login-item and security checks,
-  and a full report of every limit on your Mac (`clearx optimize`).
-- **Native menu-bar app.** Built in SwiftUI, with a black theme and glass surfaces, a first-run welcome, a Settings
-  page and VoiceOver labels. It shows apps by name, and macOS's own processes are marked and can't be paused. With
-  its windows closed, it refreshes only every 10 seconds.
 
-## Safety
-
-- It **never** sends SIGKILL, never touches root or system processes, and never changes kernel, sysctl or SIP
-  settings. It needs no admin rights.
-- Everything it pauses resumes on its own: when memory recovers, after a time limit, when you switch to the app, if
-  the menu-bar app quits, or with `clearx off`.
-- `./uninstall.sh` resumes everything and reverses every setting it changed.
-- `clearx tick --dry-run` shows what it would do right now without doing it.
+**Tools**
+- **Speed Up.** One click does real, measured actions and shows the result before and after. It offers to politely
+  quit idle apps, which ask to save first.
+- **Maintenance.** A health score, storage breakdown and cleanup, login-item and security checks, and a report of
+  every limit on your Mac (`clearx optimize`).
+- **Menu-bar app.** Native SwiftUI with a black, glass-style design. It has a Settings page, a first-run guide and
+  VoiceOver support. macOS's own processes are marked and can't be paused from it. With its windows closed, it
+  refreshes only every 10 seconds.
 
 ## Requirements
 
-- macOS 13 Ventura or later
-- Xcode Command Line Tools (for `python3` and `swiftc`): `xcode-select --install`
-- Tested on an Intel iMac (2019) running macOS 15. Apple silicon should work: the code reads the page size and VRAM
-  from the Mac, and there's no VRAM on unified memory. It hasn't been tested there yet, and reports are welcome.
+- macOS 13 Ventura or later, on Intel or Apple silicon
+- Xcode Command Line Tools, for `python3` and `swiftc`: `xcode-select --install`
+
+ClearX was developed and measured on an Intel iMac running macOS 15. It builds and passes its tests on Apple silicon
+in CI, where it reads the page size and memory layout from the Mac. Day-to-day use on Apple silicon hasn't been
+reported yet, and feedback is welcome.
 
 ## Install
 
 ```bash
-git clone https://github.com/MilGenX/ClearX.git
+git clone https://github.com/MilGenX/ClearX.git ~/ClearX
 ```
 
 ```bash
-cd ClearX && ./install.sh --login-item
+~/ClearX/install.sh --login-item
 ```
 
-This installs, for your user only:
+This installs, for your user only (no admin rights):
 
-- the daemon, a LaunchAgent that runs every 10 seconds
-- the `clearx` command in `~/.local/bin`
-- `ClearX.app` in `~/Applications`, which starts at login with `--login-item`
+| What | Where |
+|---|---|
+| Background service (runs every 10 s) | `~/Library/LaunchAgents/com.user.clearx.plist` |
+| `clearx` command | `~/.local/bin/clearx` |
+| Menu-bar app (starts at login with `--login-item`) | `~/Applications/ClearX.app` |
 
-Keep the folder where you cloned it: the daemon runs from there.
+ClearX runs from the folder you cloned, so keep it there. To remove everything and undo every change:
 
-## Use
+```bash
+~/ClearX/uninstall.sh
+```
 
-Click the turbine in the menu bar. **Speed Up** gives you a measured boost, and **Details…** opens the full window.
+## Using ClearX
+
+Click the turbine icon in the menu bar. It shows a health score, memory, processor and storage, and a **Speed Up**
+button. **Details…** opens the full window with **Right now**, **Storage**, **Clean up**, **Checks** and **Settings**.
+
 From Terminal:
 
-```bash
-clearx status
-```
+| Command | What it does |
+|---|---|
+| `clearx status` | What ClearX sees and what it's doing |
+| `clearx tick --dry-run` | What it would do right now, without doing it |
+| `clearx off` / `clearx on` | Off resumes everything and stops acting |
+| `clearx boost` | Speed Up |
+| `clearx run "<label>" <command>` | Queue a heavy job: it runs when memory allows, at background priority |
+| `clearx settings` / `clearx set <key> <value>` | Read or change the main settings |
+| `clearx optimize [--apply]` | Measure every limit of this Mac; `--apply` sets the safe user-level ones |
+| `clearx junk` | Report reclaimable disk space (read-only) |
+| `clearx log [N]` | The last N decisions |
 
-```text
-clearx status | log [N] | json        what it sees and did
-clearx tick --dry-run                 what it would do right now, without doing it
-clearx off | on                       off = resume everything and stop acting
-clearx boost [--quit "App, App"]      Speed Up from the Terminal
-clearx run "<label>" <command…>       queue a heavy job: runs when memory allows, at background priority
-clearx optimize [--apply]             measure every limit of this Mac; --apply sets the safe user-level ones
-clearx junk                           read-only report of reclaimable disk space
-```
+The full command reference is in [docs/REFERENCE.md](docs/REFERENCE.md#commands).
 
-The full list is in [docs/REFERENCE.md](docs/REFERENCE.md#commands).
+## Configuration
 
-## Configure
+The **Settings** page covers the common choices: the memory to keep ready, the App Freezer, apps never to touch,
+your audio apps and your build scripts.
 
-The **Settings** page in the app covers the common choices: the memory to keep ready, the App Freezer, apps to
-never touch, your audio apps and your build scripts. Everything else is in `clearx.conf`, which holds the shared
-defaults with every option explained. Put your own changes in **`clearx.local.conf`**. Start from [`clearx.local.conf.example`](clearx.local.conf.example), or use **Open
-settings file** in the app. It's read after the defaults, isn't tracked by git, and applies on the next tick. Common
-changes:
+Everything else is in two files:
 
-- `[freezer] never`: apps that must never be frozen
-- `[protected] apps`: whole apps (and everything they start) that ClearX never slows
-- `[modes] studio_apps`: your audio app
-- `[reserve] target`: how much memory to keep ready
-- `[queue] scripts`: your own build scripts, so they wait their turn
+- [`config/clearx.conf`](config/clearx.conf) holds the defaults, with every option explained.
+- `config/clearx.local.conf` holds your own changes. Start from
+  [`config/clearx.local.conf.example`](config/clearx.local.conf.example). It's read after the defaults, isn't tracked
+  by git, and applies within 10 seconds.
 
-## Uninstall
+## Safety
 
-```bash
-./uninstall.sh
-```
+- ClearX never sends `SIGKILL`, never touches root or macOS processes, and never changes kernel, sysctl or SIP
+  settings.
+- Everything it pauses resumes by itself: when memory recovers, after a time limit, when you switch to the app, if the
+  menu-bar app quits, or on `clearx off`.
+- Apps in front, audio, calls, downloads and your protected apps are never paused.
+- `uninstall.sh` resumes everything and reverses every setting ClearX changed.
 
 ## How it works
 
 ```
-LaunchAgent (every 10 s)            ClearX.app (menu bar)
-  clearx.py tick                      reads state/state.json, shows it
-   ├─ measure: vm_stat, swap,         wakes frozen apps on activation (SIGCONT)
-   │  VRAM/GPU, pmset therm, disk     calls `clearx` for every button
-   ├─ pool level: green…red
-   ├─ act, least first: background QoS → build caps → freeze hidden idle apps → pause the biggest job
-   └─ release in reverse once the Mac is fine again
+                 every 10 s
+LaunchAgent ───────────────► src/clearx.py tick
+                               │
+                               ├─ measure   vm_stat, swap, VRAM/GPU, pmset therm, disk latency, processes
+                               ├─ level     green → yellow → orange → red
+                               ├─ act       background QoS → build caps → freeze hidden idle apps → pause biggest job
+                               └─ release   in reverse order once the Mac is fine
+                               │
+                               ▼ state/state.json
+ClearX.app (menu bar) ─── shows it, wakes frozen apps on activation, runs `clearx` for every button
 ```
 
-A deeper walkthrough of every rule, threshold and command is in [docs/REFERENCE.md](docs/REFERENCE.md). Why it
-can't be on the Mac App Store, and what Developer ID distribution needs, is in
-[docs/DISTRIBUTION.md](docs/DISTRIBUTION.md).
+Every rule, threshold and command is described in [docs/REFERENCE.md](docs/REFERENCE.md).
+[docs/DISTRIBUTION.md](docs/DISTRIBUTION.md) covers why ClearX can't be on the Mac App Store, and what a signed
+release needs.
 
-## Project layout
+## Repository layout
 
 ```
-clearx.py          the daemon and the `clearx` command (Python 3, standard library only)
-maint.py           maintenance, storage, checks and the optimize report
-clearx.conf        defaults; clearx.local.conf.example shows how to override them
-app/               ClearX.app (SwiftUI, built by app/build.sh, no Xcode project)
-test/              unit tests on a simulated Mac, plus stress tools for real self-tests
-bench/             benchmark scripts and their recorded results
-docs/              reference, measurements, distribution notes, screenshots
+├── app/                  ClearX.app: SwiftUI sources, icon, build.sh (no Xcode project needed)
+├── benchmarks/           measurement scripts and recorded results (see benchmarks/README.md)
+├── bin/clearx            the `clearx` command
+├── config/               clearx.conf defaults, local-settings example, LaunchAgent templates
+├── docs/                 reference, measurements, distribution notes, screenshots
+├── src/                  clearx.py (the service and CLI), maint.py (maintenance and checks)
+├── tests/                unit tests on a simulated Mac, plus stress tools for live self-tests
+├── install.sh
+└── uninstall.sh
 ```
+
+The service is Python 3 using only the standard library. The app is Swift with no dependencies.
 
 ## Development
 
+Run the unit tests (whole ticks on a simulated Mac, with no real signals):
+
 ```bash
-python3 -m unittest discover -s test
+python3 -m unittest discover -s tests
 ```
+
+Build the app:
 
 ```bash
 app/build.sh
 ```
 
+Render the menu and every Details page to PNG files:
+
 ```bash
-app/build/ClearX.app/Contents/MacOS/ClearX --snapshot /tmp/shots
+app/build/ClearX.app/Contents/MacOS/ClearX --snapshot /tmp/clearx-shots
 ```
 
-The first command runs the unit tests: whole ticks on a fake Mac, with no real signals. The second builds the app.
-The third renders the menu and every Details page to PNG files.
+Issues and pull requests are welcome. With a bug report, please include the `clearx status` output and your Mac
+model.
 
-Issues and pull requests are welcome. Please include `clearx status` output and your Mac model with bug reports.
+## Screenshots
+
+<table>
+  <tr>
+    <td width="34%" valign="top"><img src="docs/images/menu.png" alt="Menu: health score, Speed Up, memory, processor, storage"></td>
+    <td valign="top"><img src="docs/images/details.png" alt="Details: memory pool, graphics memory, processor, apps using the most memory"></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>Menu bar</sub></td>
+    <td align="center"><sub>Details › Right now</sub></td>
+  </tr>
+</table>
 
 ## Roadmap
 
-- A Swift daemon inside the app (no Python), then signed and notarized Developer ID releases
-- Testing on Apple silicon
-- Every setting in the app (today the common ones are, the rest are in a text file)
+- A Swift service inside the app (no Python needed), then signed, notarized releases
+- Every setting in the app (today the main ones are; the rest are in the config file)
+- Reports from Apple silicon Macs
 
 ## License
 
 [MIT](LICENSE) © 2026 MilGenX. ClearX is provided as is. It pauses and reprioritizes your own processes; read
-**Safety** above, and use `clearx tick --dry-run` if you want to see what it would do first.
+[Safety](#safety), and use `clearx tick --dry-run` to see what it would do first.

@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """Pool state unit tests: no real processes, signals or machine readings.
-  python3 -m unittest discover -s test
+  python3 -m unittest discover -s tests
 """
 import configparser, os, sys, tempfile, unittest
 
 D = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 TMP = tempfile.mkdtemp(prefix="clearx-unit-")
 os.environ.update(CLEARX_STATE=TMP, CLEARX_LOGS=TMP)
-sys.path.insert(0, D)
+sys.path.insert(0, os.path.join(D, "src"))
 import clearx as cx  # noqa: E402
 
 GB = 1 << 30

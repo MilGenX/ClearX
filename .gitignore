@@ -8,21 +8,21 @@ __pycache__/
 
 # build output
 app/build/
-test/bin/
-bench/work/
-bench/*.out
-bench/ram-probe
-bench/ram-idle
-bench/ram-*.csv
+tests/bin/
+benchmarks/work/
+benchmarks/*.out
+benchmarks/ram-probe
+benchmarks/ram-idle
+benchmarks/ram-*.csv
 
 # your own settings and notes (never published)
-clearx.local.conf
+config/clearx.local.conf
 clearx.conf.bak-*
 clearx.py.new
 docs/private/
 
-# raw runs from your own Mac (bench/run-*, slowness samples, project-specific bench scripts)
-bench/run-*
-bench/slowness-*.json
-bench/bench-*.csv
-bench/local-*
+# raw runs from your own Mac (runs, slowness samples, machine-specific scripts)
+benchmarks/run-*
+benchmarks/slowness-*.json
+benchmarks/bench-*.csv
+benchmarks/local-*

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """20-app test (clearx ON): open ~20 of your own apps + Brave tabs, let it settle, measure memory, CPU and
-how fast each app comes to the front. Pass 2 repeats while a clean MyDAW build runs.
+how fast each app comes to the front. Pass 2 repeats while a clean CMake build runs (--build-dir).
 Quits only the apps this test opened (politely; they were freshly opened with no documents).
   python3 bench/apps-test.py [--build-dir <cmake build dir>] [--settle 300]
 """
@@ -10,7 +10,7 @@ D = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.insert(0, D)
 import clearx as mg  # noqa: E402
 
-APPS = ["Brave Browser", "MyDAW", "MyApp", "Xcode-16.4", "Music", "Mail", "Messages", "Notes", "Calendar", "Reminders",
+APPS = ["Brave Browser", "Xcode", "Music", "Mail", "Messages", "Notes", "Calendar", "Reminders",
         "Photos", "Maps", "Preview", "TextEdit", "System Settings", "Activity Monitor", "Terminal", "Claude", "ChatGPT",
         "Safari", "Finder"]
 TABS = ["https://www.youtube.com", "https://www.google.com/maps", "https://github.com/juce-framework/JUCE",
@@ -106,7 +106,7 @@ def main():
     print(json.dumps(res["pass1"], indent=1), flush=True)
 
     if bdir:
-        print("pass 2: same apps + clean MyDAW build", flush=True)
+        print("pass 2: same apps + clean build", flush=True)
         subprocess.run(["cmake", "--build", bdir, "--target", "clean", "--config", "Release"], capture_output=True)
         w1, t = mg.ssd_counters()[0], time.time()
         b = subprocess.Popen(["cmake", "--build", bdir, "--config", "Release", "--", "-quiet", "ONLY_ACTIVE_ARCH=NO",

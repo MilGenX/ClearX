@@ -1,17 +1,28 @@
+# runtime
 state/
 logs/
-app/build/
-bench/work/
-bench/mydaw-bench.out
-bench/mydaw-window.out
+diagnostics/
 __pycache__/
 *.pyc
-test/bin/
 .DS_Store
-clearx.conf.bak-*
-clearx.py.new
-diagnostics/
-bench/ram-*.csv
+
+# build output
+app/build/
+test/bin/
+bench/work/
+bench/*.out
 bench/ram-probe
 bench/ram-idle
+bench/ram-*.csv
+
+# your own settings and notes (never published)
 clearx.local.conf
+clearx.conf.bak-*
+clearx.py.new
+docs/private/
+
+# raw runs from your own Mac (bench/run-*, slowness samples, project-specific bench scripts)
+bench/run-*
+bench/slowness-*.json
+bench/bench-*.csv
+bench/local-*

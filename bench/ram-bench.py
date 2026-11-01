@@ -45,7 +45,7 @@ def job_cpu():
 
 
 def train_step():
-    p = os.path.expanduser("~/Library/Application Support/MyApp Local/distill/runs/r1-4b/adapter.gguf.work/train.log")
+    p = os.environ.get("CLEARX_TRAIN_LOG", "")  # the background job's log (llama-finetune prints data=N/M)
     try:
         tail = open(p, "rb").read()[-4000:].decode(errors="replace").replace("\r", "\n")
         import re

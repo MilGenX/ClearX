@@ -14,7 +14,7 @@ cat > "$APP/Contents/Info.plist" <<PL
   <key>CFBundleName</key><string>ClearX</string>
   <key>CFBundleExecutable</key><string>ClearX</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>3.1</string>
+  <key>CFBundleShortVersionString</key><string>3.2</string>
   <key>CFBundleIconFile</key><string>ClearX</string>
   <key>CFBundleDisplayName</key><string>ClearX</string>
   <key>LSMinimumSystemVersion</key><string>13.0</string>

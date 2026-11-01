@@ -72,8 +72,9 @@ final class Freezer: ObservableObject {
     func refresh() {
         guard let d = try? Data(contentsOf: URL(fileURLWithPath: STATE)),
               let j = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
-              let paused = j["paused"] as? [String: [String: Any]] else { frozen = []; return }
-        frozen = Array(Set(paused.values.filter { $0["kind"] as? String == "freeze" }.compactMap { $0["app"] as? String })).sorted()
+              let paused = j["paused"] as? [String: [String: Any]] else { if !frozen.isEmpty { frozen = [] }; return }
+        let now = Array(Set(paused.values.filter { $0["kind"] as? String == "freeze" }.compactMap { $0["app"] as? String })).sorted()
+        if now != frozen { frozen = now }  // (an unchanged assignment would still redraw the menu every 2 s)
     }
 
     func wakeAll() {

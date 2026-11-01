@@ -157,8 +157,11 @@ final class SMC {
 func mg(_ args: [String]) -> String {
     let p = Process(); p.executableURL = URL(fileURLWithPath: MG_CLI); p.arguments = args
     let pipe = Pipe(); p.standardOutput = pipe; p.standardError = pipe
-    try? p.run(); p.waitUntilExit()
-    return String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+    guard (try? p.run()) != nil else { return "" }
+    // read before waiting: a reply bigger than the pipe's 64 KB buffer would otherwise block both sides forever
+    let out = pipe.fileHandleForReading.readDataToEndOfFile()
+    p.waitUntilExit()
+    return String(decoding: out, as: UTF8.self)
 }
 
 // MARK: - model
@@ -185,8 +188,14 @@ final class Model: ObservableObject {
     init() {
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert]) { _, _ in }
         refresh()
-        timer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in self?.refresh() }
+        timer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in self?.tick() }
+        timer?.tolerance = 0.5
     }
+
+    /// How many ClearX windows are open (menu panel, Details). With none, only the menu-bar number is drawn, so
+    /// refresh every 10 s and skip the per-process, per-core, GPU and SMC reads (they're most of the app's CPU).
+    var visible = 0 { didSet { if visible > 0 && oldValue == 0 { refresh() } } }
+    func tick() { if visible > 0 || Date().timeIntervalSince(lastT) >= 10 { refresh() } }
 
     /// The daemon leaves its notifications in state/notify.json so they show ClearX's own name and icon
     /// (osascript ones show Script Editor's); without notification permission, fall back to osascript.
@@ -218,27 +227,41 @@ final class Model: ObservableObject {
         let dt = now.timeIntervalSince(lastT)
         if lastSwapouts > 0 && dt > 0 { swapRate = Double(s.swapouts &- lastSwapouts) * Double(pageSize) / 1048576 / dt }
         lastSwapouts = s.swapouts; lastT = now
-        swapHist.append(swapRate); if swapHist.count > 300 { swapHist.removeFirst(swapHist.count - 300) }
         swapUsed = swapUsage().used
         let lvl = sysctlInt("kern.memorystatus_level")
         pressurePct = lvl >= 0 ? 100 - lvl : 0
+        enabled = !FileManager.default.fileExists(atPath: OFF)
+        readState()
+        if visible > 0 { refreshShown() }
+    }
+
+    /// What only the open panel and Details window show.
+    private func refreshShown() {
+        swapHist.append(swapRate); if swapHist.count > 300 { swapHist.removeFirst(swapHist.count - 300) }
         if let g = gpuStats() { vramUsed = g.used; gpuUtil = g.util }
         cores = coreLoad.sample()
         let all = procs.sample()
         topMem = Array(all.sorted { $0.mem > $1.mem }.prefix(8))
         topCPU = Array(all.sorted { $0.cpu > $1.cpu }.prefix(6))
         temp = smc?.cpuTemp()
-        enabled = !FileManager.default.fileExists(atPath: OFF)
         if let d = try? Data(contentsOf: URL(fileURLWithPath: MG_DIR + "/state/maint.json")),
            let j = try? JSONSerialization.jsonObject(with: d) as? [String: Any], let h = j["health"] as? [String: Any] {
             health = h["score"] as? Int ?? 0; healthWhy = h["why"] as? [String] ?? []
-            let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"
-            ssdToday = num(((j["ssd"] as? [String: Any])?["days"] as? [String: Any])?[f.string(from: Date())])
+            ssdToday = num(((j["ssd"] as? [String: Any])?["days"] as? [String: Any])?[Model.day.string(from: Date())])
         }
         if let a = try? FileManager.default.attributesOfFileSystem(forPath: "/System/Volumes/Data") {
             diskTotal = (a[.systemSize] as? NSNumber)?.uint64Value ?? 1
         }
         loadNeeds()
+        // what Finder calls "available" = free + purgeable (space macOS clears by itself when needed)
+        if let v = try? URL(fileURLWithPath: "/").resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]),
+           let imp = v.volumeAvailableCapacityForImportantUsage {
+            diskPurgeable = UInt64(max(imp, 0)) > diskFree ? UInt64(imp) - diskFree : 0
+        }
+    }
+    private static let day: DateFormatter = { let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"; return f }()
+
+    private func readState() {
         if let d = try? Data(contentsOf: URL(fileURLWithPath: STATE)),
            let j = try? JSONSerialization.jsonObject(with: d) as? [String: Any] {
             level = j["level"] as? String ?? level
@@ -263,12 +286,6 @@ final class Model: ObservableObject {
                 diskFree = num(p["disk_free"]); diskLat = (p["disk_lat"] as? NSNumber)?.doubleValue ?? 0
                 tight = p["tight"] as? Bool ?? false
             }
-        }
-        // what Finder calls "available" = free + purgeable (space macOS clears by itself when needed); after diskFree
-        // is read for this refresh
-        if let v = try? URL(fileURLWithPath: "/").resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]),
-           let imp = v.volumeAvailableCapacityForImportantUsage {
-            diskPurgeable = UInt64(max(imp, 0)) > diskFree ? UInt64(imp) - diskFree : 0
         }
     }
 
@@ -607,6 +624,7 @@ struct Panel: View {
         }
         .padding(18)
         .frame(width: 360)
+        .onAppear { m.visible += 1 }.onDisappear { m.visible = max(0, m.visible - 1) }
         .background(Theme.bg)
         .environment(\.colorScheme, .dark)
     }
@@ -743,6 +761,7 @@ struct DetailsView: View {
             }
         }
         .frame(minWidth: 760, minHeight: 640)
+        .onAppear { m.visible += 1 }.onDisappear { m.visible = max(0, m.visible - 1) }
         .background(Theme.bg).foregroundColor(Theme.text).font(.system(size: 12))
         .buttonStyle(GhostButton()).tint(Theme.accent).preferredColorScheme(.dark)
     }

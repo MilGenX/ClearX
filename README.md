@@ -23,7 +23,7 @@ says the Mac is strained:
 Everything it does is undone automatically once the Mac recovers. It never kills a process, never touches macOS's own
 processes, and needs no admin rights.
 
-Built by **[MilGenX](https://github.com/MilGenX)** x (Anthropic).
+Built by **[MilGenX](https://github.com/MilGenX)** x Claude (Anthropic).
 
 ---
 

@@ -1,8 +1,0 @@
-# ClearX has no package dependencies (Python standard library, Swift with no packages).
-# This keeps the GitHub Actions used by CI up to date.
-version: 2
-updates:
-  - package-ecosystem: github-actions
-    directory: /
-    schedule:
-      interval: monthly

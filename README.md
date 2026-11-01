@@ -1,3 +1,5 @@
+<p align="center"><img src="docs/images/logo.png" width="128" alt="ClearX logo: a mint turbine"></p>
+
 # ClearX
 
 [![tests](https://github.com/MilGenX/ClearX/actions/workflows/test.yml/badge.svg)](https://github.com/MilGenX/ClearX/actions/workflows/test.yml)

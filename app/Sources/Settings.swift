@@ -5,14 +5,16 @@ import SwiftUI
 final class SettingsModel: ObservableObject {
     @Published var v: [String: String] = [:]
     @Published var saved: String? = nil
+    @Published var loaded = false  // nothing is written until the real values are in (or a default would overwrite them)
     func load() {
         DispatchQueue.global().async {
             let out = mg(["settings"])
             let j = out.split(separator: "\n").last.flatMap { try? JSONSerialization.jsonObject(with: Data($0.utf8)) as? [String: String] }
-            DispatchQueue.main.async { self.v = j ?? [:] }
+            DispatchQueue.main.async { self.v = j ?? [:]; self.loaded = j != nil }
         }
     }
     func set(_ key: String, _ value: String) {
+        guard loaded, v[key] != value else { return }
         v[key] = value
         DispatchQueue.global().async {
             _ = mg(["set", key, value])
@@ -49,6 +51,7 @@ struct ListField: View {
     @ObservedObject var s: SettingsModel
     let key: String, placeholder: String
     @State private var text = ""
+    @State private var edited = false  // saved only after you type in it (focus moving in or out alone never saves)
     @FocusState private var focused: Bool
     var body: some View {
         TextField(placeholder, text: $text)
@@ -56,10 +59,17 @@ struct ListField: View {
             .padding(.horizontal, 12).padding(.vertical, 8)
             .glass(10)
             .focused($focused)
+            .disabled(!s.loaded)
             .onAppear { text = s.v[key] ?? "" }
-            .onChange(of: s.v[key] ?? "") { if !focused { text = $0 } }
-            .onChange(of: focused) { if !$0, text != (s.v[key] ?? "") { s.set(key, text) } }
-            .onSubmit { s.set(key, text) }
+            .onChange(of: s.v[key] ?? "") { if !edited { text = $0 } }
+            .onChange(of: text) { if focused && s.loaded && $0 != (s.v[key] ?? "") { edited = true } }
+            .onChange(of: focused) { if !$0 { save() } }
+            .onSubmit { save() }
+    }
+    func save() {
+        guard edited else { return }
+        edited = false
+        s.set(key, text)
     }
 }
 
@@ -81,6 +91,7 @@ struct SettingsView: View {
             Card("Memory") {
                 SettingRow("Keep ready", "Memory ClearX keeps free for what you open next. More reacts sooner; 3 GB suits a 16 GB Mac.") {
                     Stepper("\(reserveGB) GB", value: Binding(get: { reserveGB }, set: { s.set("reserve.target", "\($0)G") }), in: 1...16)
+                        .disabled(!s.loaded)
                         .font(.system(size: 13, weight: .semibold).monospacedDigit())
                 }
                 SettingRow("App Freezer", "Under strain, pause hidden apps you haven't used for 5 minutes. They wake the instant you switch to them.") {

@@ -1969,6 +1969,9 @@ def set_local(key, value):
         print(f"unknown setting {key}; one of: " + ", ".join(f"{s}.{k}" for s, k in SETTINGS))
         return 1
     value = value.replace("\n", " ").strip()
+    if (sec, k) == ("freezer", "never") and not value:
+        print("freezer.never can't be empty (it keeps Finder, Dock and your tools from being frozen)")
+        return 1
     c = configparser.ConfigParser(interpolation=None)
     c.optionxform = str
     c.read(LOCAL_CONF)

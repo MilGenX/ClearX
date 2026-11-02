@@ -1,6 +1,6 @@
 """A fake Mac for tick tests: no real processes, signals, commands or clocks. FakeMachine.install(cx) points a loaded
 clearx module at it; every signal and command ClearX would send lands in `calls`, every log line in `logs`."""
-import copy, json, os, types
+import copy, json, os, signal, types
 
 GB = 1 << 30
 MB = 1 << 20
@@ -34,7 +34,7 @@ class FakeMachine:
     def _kill(self, pid, sig):
         self.calls.append(("kill", pid, int(sig)))
         if pid in self.procs:
-            self.procs[pid]["stat"] = "T" if int(sig) == 17 else "S"
+            self.procs[pid]["stat"] = "T" if int(sig) == int(signal.SIGSTOP) else "S"
 
     def _run(self, cmd, **k):
         self.calls.append(("run", tuple(cmd)))

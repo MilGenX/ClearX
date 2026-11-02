@@ -461,6 +461,8 @@ def pause(p, st, dry, why, kind="pressure"):
     if p["name"].startswith("com.apple.WebKit.") and why != "manual":
         return False  # XPC helpers of web views (Safari and apps): freezing them blanks pages (renice/QoS still fine)
     if not dry:
+        if str(p["pid"]) in st.get("throttled", {}):  # its duty-cycle loop sends SIGCONT every 200 ms: stop it first
+            stop_throttle(p["pid"], st, "paused instead")
         try:
             os.kill(p["pid"], signal.SIGSTOP)
         except ProcessLookupError:

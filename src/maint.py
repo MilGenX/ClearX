@@ -858,7 +858,6 @@ def optimize(storage_info=None, apply=False, log=print):
 
     # hardware ceiling
     mem = sh("system_profiler", "SPMemoryDataType", timeout=60)
-    slots = re.findall(r"BANK \d+/ChannelA-DIMM\d+:|DIMM\d+[^\n]*:", mem)
     sizes = re.findall(r"Size: (\S+ \S+)", mem)
     spd = (re.search(r"Speed: (\S+ MHz)", mem) or [None, "?"])[1]
     vs = sh("vm_stat")
@@ -870,7 +869,7 @@ def optimize(storage_info=None, apply=False, log=print):
     add("Storage", "Drive writes since boot (what wears an SSD; reads don't)",
         f"{human(w)} written in {days * 24:.1f} h, {human(swap_w)} of it swap; {human(r)} read (no wear)",
         "info" if rate < 100 << 30 else "applied",
-        "", f"ClearX cuts the writes: fewer compile jobs only while memory is short, apps frozen only while the compressor has room, "
+        "", "ClearX cuts the writes: fewer compile jobs only while memory is short, apps frozen only while the compressor has room, "
         "Brave disk cache capped at 300 MB. " + (lambda wr_: (
             f"The drive itself reports {wr_['wear_pct']}% of its life used after {human(wr_['lifetime_written'])} written "
             f"(about {human(wr_.get('endurance', 0))} in total); at {human(rate)}/day the rest lasts "

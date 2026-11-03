@@ -89,7 +89,7 @@ struct SettingsView: View {
                 }
             }
             Card("Memory") {
-                SettingRow("Keep ready", "Memory ClearX keeps free for what you open next. More reacts sooner; 3 GB suits a 16 GB Mac.") {
+                SettingRow("Keep ready", "Memory ClearX keeps free for what you open next. More reacts sooner; 3 to 4 GB suits a 16 GB Mac.") {
                     Stepper("\(reserveGB) GB", value: Binding(get: { reserveGB }, set: { s.set("reserve.target", "\($0)G") }), in: 1...16)
                         .disabled(!s.loaded)
                         .font(.system(size: 13, weight: .semibold).monospacedDigit())

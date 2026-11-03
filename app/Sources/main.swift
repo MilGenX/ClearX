@@ -327,7 +327,7 @@ final class Model: ObservableObject {
     }
 
     var health = 0, healthWhy: [String] = [], needs: [[String: Any]] = [], diskTotal: UInt64 = 1, diskPurgeable: UInt64 = 0
-    @Published var detailsTab = 0
+    @Published var detailsTab = 1  // "Right now", first in the sidebar
     var reserve: [String: Any]? = nil
     var ssdToday: UInt64 = 0
     private var lastNeeds = Date.distantPast
@@ -692,7 +692,7 @@ struct Panel: View {
             WelcomeCard(openSettings: { open(4) })
             FrozenRow()
             ReserveRow(m: m)
-            SimpleBar(title: "Memory", frac: Double(m.poolTotal - (m.poolSeg["free"] ?? 0) - (m.poolSeg["cached"] ?? 0)) / Double(m.poolTotal),
+            SimpleBar(title: "Memory", frac: 1 - Double((m.poolSeg["free"] ?? 0) + (m.poolSeg["cached"] ?? 0)) / Double(m.poolTotal),
                       word: memWord.0, color: memWord.1,
                       detail: "\(gb(m.availB)) of \(gb(ProcessInfo.processInfo.physicalMemory)) ready for apps right now")
             SimpleBar(title: "Processor", frac: cpuAvg / 100, word: cpuWord.0, color: cpuWord.1,
@@ -839,6 +839,25 @@ struct OutputCard: View {
     }
 }
 
+/// Moves the close/minimize/zoom buttons down and in (an empty unified toolbar: a 52 pt title bar, buttons at
+/// x 20), so they sit inside the sidebar card with even margins instead of across its top-left corner.
+struct InsetWindowButtons: NSViewRepresentable {
+    final class V: NSView {
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            guard let w = window else { return }
+            w.titleVisibility = .hidden
+            w.titlebarAppearsTransparent = true
+            w.titlebarSeparatorStyle = .none
+            w.styleMask.insert(.fullSizeContentView)
+            if w.toolbar == nil { w.toolbar = NSToolbar(identifier: "ClearX.details") }
+            w.toolbarStyle = .unified
+        }
+    }
+    func makeNSView(context: Context) -> V { V() }
+    func updateNSView(_ v: V, context: Context) {}
+}
+
 struct DetailsView: View {
     @ObservedObject var m: Model
     @StateObject var mm = MaintModel()
@@ -867,17 +886,19 @@ struct DetailsView: View {
                 }
                 Spacer()
             }
-            .padding(.top, 44).padding(.bottom, 16).padding(.horizontal, 10)  // (room for the window buttons, as in macOS 27)
+            .padding(.top, 50).padding(.bottom, 16).padding(.horizontal, 10)  // (the window buttons sit above, inside this card)
             .frame(width: 200).frame(maxHeight: .infinity, alignment: .top)
             .glass(22)
             .padding(10)
-            if flat { page.padding(24).frame(maxWidth: .infinity, alignment: .leading) }
-            else { ScrollView { page.padding(24).frame(maxWidth: .infinity, alignment: .leading) } }
+            // top: the page title lines up with "ClearX" in the sidebar, below the window buttons' bar
+            if flat { page.padding(.horizontal, 24).padding(.top, 56).padding(.bottom, 24).frame(maxWidth: .infinity, alignment: .leading) }
+            else { ScrollView { page.padding(.horizontal, 24).padding(.top, 56).padding(.bottom, 24).frame(maxWidth: .infinity, alignment: .leading) } }
         }
         .frame(minWidth: 760, minHeight: 640)
         .onAppear { m.visible += 1 }.onDisappear { m.visible = max(0, m.visible - 1) }
         .background(Theme.bg.ignoresSafeArea()).foregroundColor(Theme.text).font(.system(size: 12))
         .buttonStyle(GhostButton()).tint(Theme.accent).preferredColorScheme(.dark)
+        .background(flat ? nil : InsetWindowButtons())
     }
 
     @ViewBuilder var page: some View {
@@ -1201,8 +1222,8 @@ struct StoragePage: View {
             Card("Your drive") {
                 GeometryReader { g in
                     HStack(spacing: 0) {
-                        Rectangle().fill(Theme.info).frame(width: g.size.width * CGFloat(used / total))
-                        Rectangle().fill(Theme.accent.opacity(0.5)).frame(width: g.size.width * CGFloat(Double(m.diskPurgeable) / total))
+                        Rectangle().fill(Theme.info).frame(width: g.size.width * CGFloat(min(max(used, 0) / total, 1)))
+                        Rectangle().fill(Theme.accent.opacity(0.5)).frame(width: g.size.width * CGFloat(min(Double(m.diskPurgeable) / total, 1)))
                         Rectangle().fill(Theme.line)
                     }
                 }.frame(height: 14).clipShape(Capsule())

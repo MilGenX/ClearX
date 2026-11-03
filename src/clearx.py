@@ -461,6 +461,8 @@ def pause(p, st, dry, why, kind="pressure"):
     if p["name"].startswith("com.apple.WebKit.") and why != "manual":
         return False  # XPC helpers of web views (Safari and apps): freezing them blanks pages (renice/QoS still fine)
     if not dry:
+        if str(p["pid"]) in st.get("throttled", {}):  # its duty-cycle loop sends SIGCONT every 200 ms: stop it first
+            stop_throttle(p["pid"], st, "paused instead")
         try:
             os.kill(p["pid"], signal.SIGSTOP)
         except ProcessLookupError:
@@ -895,7 +897,7 @@ def _read_procs(c):
 
 def _note_level(c):
     """Logs level changes and the periodic heartbeat."""
-    conf, st, now, m, g, swapping_mb, pool, level, lvl, mode = c.conf, c.st, c.now, c.m, c.g, c.swapping_mb, c.pool, c.level, c.lvl, c.mode
+    conf, st, now, m, swapping_mb, pool, level, lvl, mode = c.conf, c.st, c.now, c.m, c.swapping_mb, c.pool, c.level, c.lvl, c.mode
     summary = (f"pool={level} mode={mode} swap={m['swap'] >> 20}M free={m['free'] >> 20}M avail={m['avail'] >> 20}M "
                f"pressure={m['pressure']} swapout={swapping_mb:.0f}MB/tick vram={pool['vram_pct']:.0f}% "
                f"spill={pool['spill_rate']}MB/s speed={pool['thermal']}% disk={pool['disk_free'] >> 30}G/"
@@ -2004,7 +2006,11 @@ def pid_action(cmd, pid):
     if cmd == "pause-pid":
         pause(p, st, False, "manual")
     elif cmd == "resume-pid":
-        resume(pid, st, "manual") or os.kill(pid, signal.SIGCONT)
+        if not resume(pid, st, "manual"):
+            try:
+                os.kill(pid, signal.SIGCONT)
+            except OSError:
+                pass  # (already gone)
     elif cmd == "bg-pid":
         background(p, st, False, "manual")
     elif cmd == "fg-pid":
@@ -2015,6 +2021,7 @@ def pid_action(cmd, pid):
         stop_throttle(pid, st, "manual")
     elif cmd == "quit-pid":  # polite quit only: SIGCONT first (in case paused), then SIGTERM
         resume(pid, st, "quit")
+        stop_throttle(pid, st, "quit")  # (its duty-cycle loop would keep stopping it mid-quit)
         os.kill(pid, signal.SIGCONT)
         os.kill(pid, signal.SIGTERM)
         log(f"QUIT (SIGTERM) pid={pid} {p['name']} (manual)")

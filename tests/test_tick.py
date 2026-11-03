@@ -55,6 +55,17 @@ class Tick(unittest.TestCase):
         self.assertIn(HOG, self.signals(fm, CONT))
         self.assertEqual(fm.state["paused"], {})
 
+    def test_pausing_a_throttled_hog_stops_its_duty_cycle_first(self):
+        fm = machine()
+        fm.tick(cx)
+        fm.state["throttled"] = {str(HOG): dict(name="hog", t=fm.clock, loop=777777, duty=0.5, why="cpu", start="start")}
+        fm.mem.update(pressure=4, avail=GB)
+        st = fm.tick(cx)
+        self.assertIn(str(HOG), st["paused"])
+        self.assertNotIn(str(HOG), st.get("throttled", {}))  # else its loop SIGCONTs it within 200 ms
+        self.assertIn(("kill", 777777, int(signal.SIGTERM)), fm.calls)
+        self.assertEqual(fm.procs[HOG]["stat"], "T")
+
     def orange(self, fm):
         fm.swap_out(2000)  # 2 GB in one tick: ~33 MB/s over the minute, with under 4 GB available
         fm.mem.update(avail=3 * GB)

@@ -14,7 +14,7 @@ Usage:
   clearx bench run <label> [--guard-swap 3G] [--guard-avail 500M] [--max-seconds N] -- <command>   (workload benchmark)
   clearx off | on
   clearx settings | set <section.key> <value>   the settings the app shows; set writes clearx.local.conf
-  clearx maintain [all|scan|clean <cat,...>|large|startup|disable <label>|enable <label>
+  clearx maintain [all|scan|clean <cat,...>|large|startup|disable <label>|enable <label>|keep [--apply]|unarchive <path|all>
                      |uninstall <App> [--vendor com.x] [--apply]|updates|security|health|storage|optimize]
   clearx run "<label>" [--slots N] <command...>   heavy-job queue: one (or N) at a time, low priority
   clearx wake [all|<app>]   unfreeze apps frozen by the App Freezer
@@ -1421,8 +1421,33 @@ def tick(dry=False, force=None):
     c = types.SimpleNamespace(conf=conf, st=st, dry=dry, force=force, now=time.time())
     for step in (_read_pool, _read_procs, _note_level, _drop_exited, _release_overdue, _reserve_and_freeze, _classify,
                  _gpu_spill, _thermal, _heat, _build_jobs, _mode_priorities, _budgets, _pressure, _build_guard,
-                 _release_healthy, _cpu_governor, _finish):  # order matters: each step sees what the last one did
+                 _release_healthy, _cpu_governor, _keeper, _finish):  # order matters: each step sees what the last one did
         step(c)
+
+
+def _keeper(c):
+    """The disk keeper (src/keeper.py) once a day, started while you're away from the Mac (no input for [keeper]
+    idle_min minutes) and not in studio mode; it stops itself the moment you're back and carries on next time."""
+    conf, st, now = c.conf, c.st, c.now
+    if c.dry or not conf.getboolean("keeper", "enabled", fallback=True) or c.mode == "studio":
+        return
+    if now - st.get("keeper_t", 0) < conf.getfloat("keeper", "every_h", fallback=20) * 3600:
+        return
+    if pid_alive(st.get("keeper_pid")) or hid_idle_s() < conf.getfloat("keeper", "idle_min", fallback=15) * 60:
+        return
+    st["keeper_t"] = now
+    p = subprocess.Popen(["taskpolicy", "-b", sys.executable, os.path.realpath(__file__), "maintain", "keep", "--apply", "--auto"],
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+    st["keeper_pid"] = p.pid
+    log(f"KEEP started (pid {p.pid})")
+
+
+def pid_alive(pid):
+    try:
+        os.kill(int(pid), 0)
+        return True
+    except (TypeError, ValueError, OSError):
+        return False
 
 
 # ---------- junk report (read-only) ----------
@@ -1889,6 +1914,28 @@ def maintain(args):
             print("done" if ok else "not done")
         if args[1] == "caches":
             d["junk"] = maint.scan_junk(); d["junk_t"] = time.time()
+    if sub == "keep":  # the disk keeper; a preview unless --apply (--auto: started by the tick, stops when you're back)
+        import keeper
+        apply, auto = "--apply" in args, "--auto" in args
+        stop = (lambda: hid_idle_s() < 60) if auto else (lambda: False)
+        ks = d.setdefault("keeper_state", {})
+        r = keeper.keep(log=log, apply=apply, stop=stop, state=ks)
+        d["keeper"] = r
+        verb = "freed" if apply else "could free"
+        print(f"== Disk keeper: {verb} {H(r['total'])}" + (" (stopped: you're back; the rest next time)" if r["stopped"] else ""))
+        for k, v in r["freed"].items():
+            print(f"  {H(v):>10}  {keeper.TITLES.get(k, k)}  (found {H(r['found'].get(k, 0))})")
+        for p, g in r["grew"]:
+            print(f"  grew {H(g)} since the last run: {p.replace(os.path.expanduser('~'), '~')}")
+        if auto:
+            if r["total"] >= 1 << 30:
+                notify("Disk keeper", f"Freed {H(r['total'])} while you were away")
+            if r["grew"]:
+                p, g = r["grew"][0]
+                notify("Disk filling up", f"{os.path.basename(p)} grew {H(g)} since yesterday")
+    if sub == "unarchive" and len(args) > 1:
+        import keeper
+        print(f"put back {keeper.unarchive(os.path.expanduser(args[1]) if args[1] != 'all' else 'all', log)} files")
     if sub == "optimize":
         d["optimize"] = maint.optimize(d.get("storage"), apply="--apply" in args, log=log)
         print_optimize(d["optimize"])

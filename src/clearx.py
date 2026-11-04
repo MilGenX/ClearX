@@ -1469,7 +1469,7 @@ def _keeper(c):
                     out += [f"{k / 1e6:8.1f} GB  {p}" for k, p in rows[:40]]
                 elif cmd in ("remove", "trim") and os.path.expanduser(arg.rsplit(" ", 1)[0] if cmd == "trim" else arg).startswith(
                         os.path.expanduser("~/Library/Application Support/")):
-                    # app data Finder can't reach from a helper (privacy-protected), on request only, and never
+                    # app data Finder can't reach from a helper (privacy-protected), to the Trash on request only, never
                     # anything written in the last day: "remove <path>", or "trim <folder> <n>" keeps its newest n
                     import keeper
                     if cmd == "trim":
@@ -1482,9 +1482,8 @@ def _keeper(c):
                             out.append(f"left (missing or written in the last day): {t}")
                             continue
                         sz = maint.du(t)
-                        shutil.rmtree(t) if os.path.isdir(t) else os.remove(t)
-                        log(f"KEEP removed on request {t} ({maint.human(sz)})")
-                        out.append(f"removed {sz / 1e9:.1f} GB  {t}")
+                        moved = maint.move_to_trash(t, log)  # (the Trash: undoable until it's emptied)
+                        out.append(f"{'to the Trash' if moved else 'left'} {sz / 1e9:.1f} GB  {t}")
                 elif l == "fix iosdev":
                     out.append(f"fix iosdev: {maint.fix('iosdev', log)}")
                 else:

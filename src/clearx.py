@@ -1435,6 +1435,20 @@ def _keeper(c):
     # the church iMac all the time, so "studio mode" kept the keeper from ever starting (2026-11-04)
     if any(os.path.exists(os.path.expanduser(f)) for f in globs(conf.get("keeper", "busy_files", fallback="~/Library/ECX/music-busy"))):
         return
+    # a one-off eviction asked for by a person or a helper: state/keeper-evict.req (one path per line) -> .out
+    req = os.path.join(STATE_DIR, "keeper-evict.req")
+    if os.path.exists(req):
+        try:
+            sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
+            import keeper
+            with open(req) as f:
+                paths = [l.strip() for l in f if l.strip()]
+            os.remove(req)
+            with open(req[:-4] + ".out", "w") as f:
+                for p, why in keeper.evict_paths(paths):
+                    f.write(f"{'ok' if why is None else 'NO ' + why}\t{p}\n")
+        except Exception as e:
+            log(f"KEEP evict request failed: {e}")
     # what this macOS's fileproviderctl can do (2026-11-04: `evict` printed its usage, exit 64), kept once for ECX and Drive
     hp = os.path.join(STATE_DIR, "fileproviderctl-help.txt")
     if not os.path.exists(hp) and os.path.exists("/usr/bin/fileproviderctl"):

@@ -462,19 +462,46 @@ def drive_files(days=None):
     return out
 
 
+# macOS 15's fileproviderctl has no `evict` (it prints its usage, exit 64: 2026-11-04, ECX's first Drive pass freed
+# nothing). Foundation's evictUbiquitousItemAtURL is Finder's "Remove Download" for any File Provider (Google Drive
+# too): called through JavaScript for Automation, no app to build. One line back per path: "ok" or "err: <why>".
+EVICT_JXA = """ObjC.import('Foundation');
+function run(argv) {
+  var fm = $.NSFileManager.defaultManager, out = [];
+  for (var i = 0; i < argv.length; i++) {
+    var err = Ref();
+    var ok = fm.evictUbiquitousItemAtURLError($.NSURL.fileURLWithPath(argv[i]), err);
+    out.push(ok ? 'ok' : 'err: ' + (err[0] ? ObjC.unwrap(err[0].localizedDescription) : 'unknown'));
+  }
+  return out.join('\\n');
+}"""
+
+
+def evict_paths(paths, chunk=100):
+    """[(path, None | why it wasn't freed)] for each path."""
+    res = []
+    for i in range(0, len(paths), chunk):
+        part = paths[i:i + chunk]
+        code, out = run("osascript", "-l", "JavaScript", "-e", EVICT_JXA, *part, timeout=600)
+        lines = out.strip().split("\n") if code == 0 else []
+        for j, p in enumerate(part):
+            ln = lines[j] if j < len(lines) else ("err: " + out.strip()[:200])
+            res.append((p, None if ln == "ok" else ln[5:]))
+    return res
+
+
 def evict(items, log, apply):
+    if not apply:
+        return sum(i["size"] for i in items)
     freed = failed = 0
     first = ""
-    for i in items:
-        if not apply:
-            freed += i["size"]
-            continue
-        code, out = run("/usr/bin/fileproviderctl", "evict", i["path"], timeout=60)
-        if code == 0:
-            freed += i["size"]
+    size = {i["path"]: i["size"] for i in items}
+    for p, why in evict_paths([i["path"] for i in items]):
+        if why is None:
+            freed += size[p]
         else:
             failed += 1
-            first = first or f"{os.path.basename(i['path'])}: {out.strip()[:200]}"
+            first = first or f"{os.path.basename(p)}: {why}"
     if failed:
         log(f"KEEP Drive wouldn't free {failed} files (first: {first})")
     return freed

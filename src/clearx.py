@@ -1431,6 +1431,15 @@ def _keeper(c):
     conf, st, now = c.conf, c.st, c.now
     if c.dry or not conf.getboolean("keeper", "enabled", fallback=True) or c.mode == "studio":
         return
+    # what this macOS's fileproviderctl can do (2026-11-04: `evict` printed its usage, exit 64), kept once for ECX and Drive
+    hp = os.path.join(STATE_DIR, "fileproviderctl-help.txt")
+    if not os.path.exists(hp) and os.path.exists("/usr/bin/fileproviderctl"):
+        try:
+            r = subprocess.run(["/usr/bin/fileproviderctl", "help"], capture_output=True, timeout=20)
+            with open(hp, "wb") as f:
+                f.write(r.stdout + r.stderr)
+        except (OSError, subprocess.TimeoutExpired):
+            pass
     if now - st.get("keeper_t", 0) < conf.getfloat("keeper", "every_h", fallback=20) * 3600:
         return
     if pid_alive(st.get("keeper_pid")) or hid_idle_s() < conf.getfloat("keeper", "idle_min", fallback=15) * 60:

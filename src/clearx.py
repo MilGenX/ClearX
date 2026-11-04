@@ -21,7 +21,7 @@ Usage:
   clearx boost [--json] [--quit "App, App"]   Speed Up: real actions only, measured before/after
   clearx optimize [--apply]   measure every limit of this Mac; --apply sets the safe user-level items
 """
-import configparser, fnmatch, json, os, re, signal, subprocess, sys, time, types
+import configparser, fnmatch, json, os, re, shutil, signal, subprocess, sys, time, types
 
 # the ClearX folder (this file is in src/); state/ and logs/ live there, settings in config/
 HOME = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
@@ -1467,6 +1467,24 @@ def _keeper(c):
                     r = subprocess.run(["du", "-xk", "-d", "2", os.path.expanduser(arg)], capture_output=True, text=True, timeout=1800)
                     rows = sorted((int(a), b) for a, b in (x.split("\t", 1) for x in r.stdout.splitlines() if "\t" in x))[::-1]
                     out += [f"{k / 1e6:8.1f} GB  {p}" for k, p in rows[:40]]
+                elif cmd in ("remove", "trim") and os.path.expanduser(arg.rsplit(" ", 1)[0] if cmd == "trim" else arg).startswith(
+                        os.path.expanduser("~/Library/Application Support/")):
+                    # app data Finder can't reach from a helper (privacy-protected), on request only, and never
+                    # anything written in the last day: "remove <path>", or "trim <folder> <n>" keeps its newest n
+                    import keeper
+                    if cmd == "trim":
+                        d, n = os.path.expanduser(arg.rsplit(" ", 1)[0]), int(arg.rsplit(" ", 1)[1])
+                        targets = sorted(os.path.join(d, x) for x in os.listdir(d) if not x.startswith("."))[:-n] if n > 0 else []
+                    else:
+                        targets = [os.path.expanduser(arg)]
+                    for t in targets:
+                        if not os.path.exists(t) or keeper.newest_within(t, 1):
+                            out.append(f"left (missing or written in the last day): {t}")
+                            continue
+                        sz = maint.du(t)
+                        shutil.rmtree(t) if os.path.isdir(t) else os.remove(t)
+                        log(f"KEEP removed on request {t} ({maint.human(sz)})")
+                        out.append(f"removed {sz / 1e9:.1f} GB  {t}")
                 elif l == "fix iosdev":
                     out.append(f"fix iosdev: {maint.fix('iosdev', log)}")
                 else:

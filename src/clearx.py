@@ -1427,9 +1427,13 @@ def tick(dry=False, force=None):
 
 def _keeper(c):
     """The disk keeper (src/keeper.py) once a day, started while you're away from the Mac (no input for [keeper]
-    idle_min minutes) and not in studio mode; it stops itself the moment you're back and carries on next time."""
+    idle_min minutes) and no music playing; it stops itself the moment you're back and carries on next time."""
     conf, st, now = c.conf, c.st, c.now
-    if c.dry or not conf.getboolean("keeper", "enabled", fallback=True) or c.mode == "studio":
+    if c.dry or not conf.getboolean("keeper", "enabled", fallback=True):
+        return
+    # music actually playing (ECX's music-busy note, or any [keeper] busy_files), not just a DAW open: ECX is open on
+    # the church iMac all the time, so "studio mode" kept the keeper from ever starting (2026-11-04)
+    if any(os.path.exists(os.path.expanduser(f)) for f in globs(conf.get("keeper", "busy_files", fallback="~/Library/ECX/music-busy"))):
         return
     # what this macOS's fileproviderctl can do (2026-11-04: `evict` printed its usage, exit 64), kept once for ECX and Drive
     hp = os.path.join(STATE_DIR, "fileproviderctl-help.txt")

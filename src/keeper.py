@@ -469,9 +469,9 @@ EVICT_JXA = """ObjC.import('Foundation');
 function run(argv) {
   var fm = $.NSFileManager.defaultManager, out = [];
   for (var i = 0; i < argv.length; i++) {
-    var err = Ref();
-    var ok = fm.evictUbiquitousItemAtURLError($.NSURL.fileURLWithPath(argv[i]), err);
-    out.push(ok ? 'ok' : 'err: ' + (err[0] ? ObjC.unwrap(err[0].localizedDescription) : 'unknown'));
+    // (a Ref() for the NSError crashed osascript, exit -11: nil instead, so only yes or no comes back)
+    var ok = fm.evictUbiquitousItemAtURLError($.NSURL.fileURLWithPath(argv[i]), null);
+    out.push(ok ? 'ok' : 'err: the file provider refused (not uploaded yet, open, or not a cloud file)');
   }
   return out.join('\\n');
 }"""

@@ -1449,6 +1449,32 @@ def _keeper(c):
                     f.write(f"{'ok' if why is None else 'NO ' + why}\t{p}\n")
         except Exception as e:
             log(f"KEEP evict request failed: {e}")
+    # a measurement or a listed clean-up asked for by a person or a helper: state/keeper-run.req, one per line:
+    # "du <folder>" (its biggest folders, two levels down) or "fix iosdev" (maint.fix: simulators, runtimes, iOS
+    # DeviceSupport) -> keeper-run.out. Nothing else is run.
+    req = os.path.join(STATE_DIR, "keeper-run.req")
+    if os.path.exists(req):
+        try:
+            sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
+            import maint
+            with open(req) as f:
+                lines = [l.strip() for l in f if l.strip()]
+            os.remove(req)
+            out = []
+            for l in lines:
+                cmd, _, arg = l.partition(" ")
+                if cmd == "du" and os.path.isdir(os.path.expanduser(arg)):
+                    r = subprocess.run(["du", "-xk", "-d", "2", os.path.expanduser(arg)], capture_output=True, text=True, timeout=1800)
+                    rows = sorted((int(a), b) for a, b in (x.split("\t", 1) for x in r.stdout.splitlines() if "\t" in x))[::-1]
+                    out += [f"{k / 1e6:8.1f} GB  {p}" for k, p in rows[:40]]
+                elif l == "fix iosdev":
+                    out.append(f"fix iosdev: {maint.fix('iosdev', log)}")
+                else:
+                    out.append(f"not run: {l}")
+            with open(req[:-4] + ".out", "w") as f:
+                f.write("\n".join(out) + "\n")
+        except Exception as e:
+            log(f"KEEP run request failed: {e}")
     # what this macOS's fileproviderctl can do (2026-11-04: `evict` printed its usage, exit 64), kept once for ECX and Drive
     hp = os.path.join(STATE_DIR, "fileproviderctl-help.txt")
     if not os.path.exists(hp) and os.path.exists("/usr/bin/fileproviderctl"):

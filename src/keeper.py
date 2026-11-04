@@ -485,7 +485,7 @@ def evict_paths(paths, chunk=100):
         code, out = run("osascript", "-l", "JavaScript", "-e", EVICT_JXA, *part, timeout=600)
         lines = out.strip().split("\n") if code == 0 else []
         for j, p in enumerate(part):
-            ln = lines[j] if j < len(lines) else ("err: " + out.strip()[:200])
+            ln = lines[j] if j < len(lines) else (f"err: osascript exit {code}: " + out.strip()[:300])
             res.append((p, None if ln == "ok" else ln[5:]))
     return res
 

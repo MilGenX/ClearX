@@ -1558,7 +1558,7 @@ def _keeper(c):
                         r = subprocess.run(["git", "-C", repo, "pull", "--ff-only", "-q"], capture_output=True, timeout=600)
                         h = subprocess.run(["git", "-C", repo, "log", "-1", "--format=%h %cr: %s"], capture_output=True, timeout=30)
                         out.append(f"pull {repo}: {'ok' if r.returncode == 0 else 'failed'} {(r.stdout + r.stderr).decode('utf-8', 'replace').strip()[:300]} | now {h.stdout.decode('utf-8', 'replace').strip()[:120]}")
-                elif l in ("notes export", "notes apply", "notes forget"):  # Apple Notes read / arranged (src/notes.py)
+                elif l in ("notes export", "notes apply", "notes forget", "notes test"):  # Apple Notes read / arranged (src/notes.py)
                     import notes
                     out.append(getattr(notes, l.split()[1])(STATE_DIR))
                 elif l == "fix iosdev":

@@ -111,6 +111,14 @@ def apply(state_dir):
     return f"notes apply (exit {code}):\n{out}{err[:2000]}"
 
 
+def test(state_dir):
+    if not os.environ.get("TERM_PROGRAM"):
+        return via_terminal("test", state_dir)
+    a = subprocess.run(["osascript", "-e", 'tell application "Notes" to count notes'], capture_output=True, timeout=120)
+    b = _osa("Application('Notes').notes.length")
+    return f"applescript: {a.returncode} {a.stdout!r} {a.stderr!r}\njxa: {b}"
+
+
 def forget(state_dir):
     for n in ("notes.json",):
         try:

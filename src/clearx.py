@@ -14,7 +14,7 @@ Usage:
   clearx bench run <label> [--guard-swap 3G] [--guard-avail 500M] [--max-seconds N] -- <command>   (workload benchmark)
   clearx off | on
   clearx settings | set <section.key> <value>   the settings the app shows; set writes clearx.local.conf
-  clearx maintain [all|scan|clean <cat,...>|large|startup|disable <label>|enable <label>|keep [--apply]|unarchive <path|all>
+  clearx maintain [all|scan|clean <cat,...>|large|startup|disable <label>|enable <label>|keep [--apply]|unarchive <path|all>|health [--fix]
                      |uninstall <App> [--vendor com.x] [--apply]|updates|security|health|storage|optimize]
   clearx run "<label>" [--slots N] <command...>   heavy-job queue: one (or N) at a time, low priority
   clearx wake [all|<app>]   unfreeze apps frozen by the App Freezer
@@ -1282,7 +1282,11 @@ def _build_guard(c):
         max_jobs = int(P.get("thermal_jobs", 4)) if spd < 100 and not c.away else 10 ** 6
         if stage >= 3:
             max_jobs = min(max_jobs, 2)
-        running = [p for p in elig if matches(p["name"], compilers) and "T" not in p["stat"]]
+        # a compiler driver waiting on its own compiler child (clang -> clang -cc1) isn't a job of its own: counted,
+        # the drivers of held jobs filled the job cap and the held jobs never got room (2026-11-03: 14 clangs held
+        # 2 h, the ECX update stalled and was ended twice)
+        drivers = {p["ppid"] for p in c.procs.values() if matches(p["name"], compilers)}
+        running = [p for p in elig if matches(p["name"], compilers) and "T" not in p["stat"] and p["pid"] not in drivers]
         for p in running:
             p["started"] = start_epoch(p["pid"])
         running.sort(key=lambda p: (p["started"], p["pid"]))
@@ -2058,6 +2062,17 @@ def maintain(args):
             if r["grew"]:
                 p, g = r["grew"][0]
                 notify("Disk filling up", f"{os.path.basename(p)} grew {H(g)} since yesterday")
+    if sub == "health" or (sub == "keep" and "--auto" in args):  # the health watch (src/health.py): also after each daily keep
+        import health
+        found, new = health.check(log=log, state=d.setdefault("health_state", {}), fix=sub == "keep" or "--fix" in args)
+        path = health.write_report(found)
+        d["health"] = dict(t=time.time(), found=found)
+        print(f"== Mac health: {len(found)} things ({path.replace(os.path.expanduser('~'), '~')})")
+        for lvl, key, text in found:
+            print(f"  [{lvl}] {text}")
+        if "--auto" in args:
+            for lvl, key, text in new[:3]:
+                notify("Mac health", text[:180])
     if sub == "unarchive" and len(args) > 1:
         import keeper
         print(f"put back {keeper.unarchive(os.path.expanduser(args[1]) if args[1] != 'all' else 'all', log)} files")

@@ -26,3 +26,7 @@ benchmarks/run-*
 benchmarks/slowness-*.json
 benchmarks/bench-*.csv
 benchmarks/local-*
+
+# local
+config/backups/
+gpu/.build/

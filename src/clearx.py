@@ -1534,7 +1534,7 @@ def _keeper(c):
                         except (OSError, subprocess.TimeoutExpired) as e:
                             txt = f"(failed: {e})"
                         out.append(f"===== {title}\n{txt[:20000]}")
-                elif l in ("hub install", "hub status", "hub to-switch", "hub uninstall"):
+                elif l in ("hub install", "hub status", "hub ini-file", "hub to-switch", "hub uninstall"):
                     # the Hub service (github.com/MilGenX/Hub, X's own: every device one system): fetched into
                     # ~/Developer/Hub, then its own installer / its own copy to the Switch's SD card is run
                     repo = os.path.expanduser("~/Developer/Hub")

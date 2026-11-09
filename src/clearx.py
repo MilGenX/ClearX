@@ -1534,6 +1534,20 @@ def _keeper(c):
                         except (OSError, subprocess.TimeoutExpired) as e:
                             txt = f"(failed: {e})"
                         out.append(f"===== {title}\n{txt[:20000]}")
+                elif l in ("hub install", "hub to-switch", "hub uninstall"):
+                    # the Hub service (github.com/MilGenX/Hub, X's own: every device one system): fetched into
+                    # ~/Developer/Hub, then its own installer / its own copy to the Switch's SD card is run
+                    repo = os.path.expanduser("~/Developer/Hub")
+                    if not os.path.isdir(os.path.join(repo, ".git")):
+                        r = subprocess.run(["git", "clone", "-q", "https://github.com/MilGenX/Hub.git", repo], capture_output=True, timeout=600)
+                        out.append(f"hub: clone {'ok' if r.returncode == 0 else 'failed'} {(r.stdout + r.stderr).decode('utf-8', 'replace').strip()[:300]}")
+                    else:
+                        r = subprocess.run(["git", "-C", repo, "pull", "--ff-only", "-q"], capture_output=True, timeout=600)
+                        out.append(f"hub: pull {'ok' if r.returncode == 0 else 'failed'} {(r.stdout + r.stderr).decode('utf-8', 'replace').strip()[:300]}")
+                    hubd = os.path.join(repo, "server", "hubd.py")
+                    if os.path.exists(hubd):
+                        r = subprocess.run(["/usr/bin/python3", hubd, "--" + l.split()[1]], capture_output=True, timeout=600)
+                        out.append((r.stdout + r.stderr).decode("utf-8", "replace").strip()[:2000])
                 elif l == "usb":  # what's plugged in by USB (read-only)
                     r = subprocess.run(["system_profiler", "SPUSBDataType", "SPUSBHostDataType"], capture_output=True, timeout=120)
                     out.append((r.stdout + r.stderr).decode("utf-8", "replace")[:20000])

@@ -147,9 +147,12 @@ def folders(state_dir):
         pairs = json.load(f)
     res = []
     for a, b in pairs:
-        r = subprocess.run(["osascript", "-e", f'tell application id "com.apple.Notes" to move folder id "{a}" to folder id "{b}"'],
-                           capture_output=True, timeout=120)
-        res.append(f"{'ok' if r.returncode == 0 else 'FAILED'} {a} -> {b} {r.stderr.decode('utf-8', 'replace').strip()[:200]}")
+        try:  # (one that hangs, e.g. a shared folder Notes won't move, never stops the rest)
+            r = subprocess.run(["osascript", "-e", f'tell application id "com.apple.Notes" to move folder id "{a}" to folder id "{b}"'],
+                               capture_output=True, timeout=60)
+            res.append(f"{'ok' if r.returncode == 0 else 'FAILED'} {a} -> {b} {r.stderr.decode('utf-8', 'replace').strip()[:200]}")
+        except subprocess.TimeoutExpired:
+            res.append(f"TIMED OUT {a} -> {b}")
     os.rename(p, p + ".done")
     return "notes folders:\n" + "\n".join(res)
 

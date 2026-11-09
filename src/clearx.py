@@ -1530,6 +1530,15 @@ def _keeper(c):
                         except (OSError, subprocess.TimeoutExpired) as e:
                             txt = f"(failed: {e})"
                         out.append(f"===== {title}\n{txt[:20000]}")
+                elif l == "who caffeinate":  # what holds the Mac awake: each caffeinate and its parent chain
+                    r = subprocess.run(["sh", "-c", "for p in $(pgrep -x caffeinate); do ps -o pid,ppid,etime,command -p $p; pp=$(ps -o ppid= -p $p); for i in 1 2 3; do [ -n \"$pp\" ] && [ \"$pp\" -gt 1 ] && ps -o pid,ppid,etime,command -p $pp | tail -1 && pp=$(ps -o ppid= -p $pp); done; done"],
+                                       capture_output=True, timeout=60)
+                    out.append((r.stdout + r.stderr).decode("utf-8", "replace"))
+                elif l == "brew fix":  # Homebrew's own advice from `brew doctor` (no sudo): the stray local core tap
+                    env = dict(os.environ, PATH="/usr/local/bin:/opt/homebrew/bin:" + os.environ.get("PATH", ""))
+                    r = subprocess.run(["sh", "-c", "brew untap --force homebrew/core 2>&1; brew update 2>&1 | tail -3; brew doctor 2>&1 | grep -E '^Warning' "],
+                                       capture_output=True, timeout=900, env=env)
+                    out.append((r.stdout + r.stderr).decode("utf-8", "replace"))
                 elif l == "fix iosdev":
                     out.append(f"fix iosdev: {maint.fix('iosdev', log)}")
                 else:

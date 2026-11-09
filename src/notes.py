@@ -119,6 +119,41 @@ def test(state_dir):
     return f"applescript: {a.returncode} {a.stdout!r} {a.stderr!r}\njxa: {b}"
 
 
+TREE = r"""
+const N = Application('com.apple.Notes'); const out = [];
+N.folders().forEach(f => { let c = ''; try { c = f.container().name(); } catch (e) { c = '?'; }
+  let n = 0; try { n = f.notes.length; } catch (e) {}
+  let sh = false; try { sh = f.shared(); } catch (e) {}
+  out.push([f.id(), f.name(), c, n, sh]); });
+JSON.stringify(out);
+"""
+
+
+def tree(state_dir):
+    """Every folder with the folder (or account) it sits in: state/notes-tree.json (names only, no note text)."""
+    code, out, err = _osa(TREE)
+    if code != 0:
+        return f"notes tree failed: {err.strip()[:500]}"
+    with open(os.path.join(state_dir, "notes-tree.json"), "w") as f:
+        f.write(out)
+    return f"notes tree: {len(json.loads(out))} folders"
+
+
+def folders(state_dir):
+    """Folders moved into folders with AppleScript (JXA's move reports success but leaves folders where they were):
+    state/notes-folders.json = [[folder id, target folder id], ...]."""
+    p = os.path.join(state_dir, "notes-folders.json")
+    with open(p) as f:
+        pairs = json.load(f)
+    res = []
+    for a, b in pairs:
+        r = subprocess.run(["osascript", "-e", f'tell application id "com.apple.Notes" to move folder id "{a}" to folder id "{b}"'],
+                           capture_output=True, timeout=120)
+        res.append(f"{'ok' if r.returncode == 0 else 'FAILED'} {a} -> {b} {r.stderr.decode('utf-8', 'replace').strip()[:200]}")
+    os.rename(p, p + ".done")
+    return "notes folders:\n" + "\n".join(res)
+
+
 def forget(state_dir):
     for n in ("notes.json",):
         try:

@@ -1425,6 +1425,44 @@ def tick(dry=False, force=None):
         step(c)
 
 
+# `diag` in state/keeper-run.req: what a full check-up reads (all read-only)
+DIAG = [
+    ("macOS", ["sw_vers"]),
+    ("hardware", ["system_profiler", "SPHardwareDataType", "SPStorageDataType", "SPPowerDataType"]),
+    ("uptime", ["uptime"]),
+    ("updates", ["softwareupdate", "-l"]),
+    ("filevault", ["fdesetup", "status"]),
+    ("sip", ["csrutil", "status"]),
+    ("gatekeeper", ["spctl", "--status"]),
+    ("firewall", ["/usr/libexec/ApplicationFirewall/socketfilterfw", "--getglobalstate", "--getstealthmode"]),
+    ("time machine", ["tmutil", "destinationinfo"]),
+    ("tm latest", ["tmutil", "latestbackup"]),
+    ("local snapshots", ["tmutil", "listlocalsnapshots", "/"]),
+    ("apfs", ["diskutil", "apfs", "list"]),
+    ("smart", ["diskutil", "info", "disk0"]),
+    ("power", ["pmset", "-g"]),
+    ("assertions", ["pmset", "-g", "assertions"]),
+    ("swap", ["sysctl", "vm.swapusage", "vm.memory_pressure", "hw.memsize"]),
+    ("vm_stat", ["vm_stat"]),
+    ("top cpu", ["ps", "-Ao", "pid,pcpu,pmem,rss,etime,comm", "-r"]),
+    ("top mem", ["ps", "-Ao", "pid,rss,pcpu,etime,comm", "-m"]),
+    ("launchd user", ["launchctl", "list"]),
+    ("launch agents", ["ls", "-la", os.path.expanduser("~/Library/LaunchAgents"), "/Library/LaunchAgents", "/Library/LaunchDaemons"]),
+    ("login items", ["osascript", "-e", 'tell application "System Events" to get the name of every login item']),
+    ("background items", ["sfltool", "dumpbtm"]),
+    ("crashes", ["sh", "-c", "ls -lt ~/Library/Logs/DiagnosticReports /Library/Logs/DiagnosticReports 2>/dev/null | head -60"]),
+    ("panics", ["sh", "-c", "ls -lt /Library/Logs/DiagnosticReports/*panic* 2>/dev/null | head"]),
+    ("brew", ["sh", "-c", "PATH=/usr/local/bin:/opt/homebrew/bin:$PATH; brew --version && brew outdated && brew doctor 2>&1 | head -60"]),
+    ("xcode", ["sh", "-c", "xcode-select -p; xcodebuild -version; ls /Applications | grep -i xcode"]),
+    ("network", ["sh", "-c", "networksetup -listallhardwareports; scutil --dns | head -30; ifconfig | grep -E 'flags|inet ' | head -30"]),
+    ("disk free", ["df", "-h"]),
+    ("purgeable", ["sh", "-c", "diskutil info / | grep -iE 'free|purg|used|capacity'"]),
+    ("var folders", ["sh", "-c", "du -sh /private/var/folders/* /private/var/vm /Library/Caches /Library/Application\\ Support /Library/Developer /Users/Shared 2>/dev/null"]),
+    ("library app support", ["sh", "-c", "du -xsh ~/Library/Application\\ Support/* ~/Library/Developer ~/Library/Group\\ Containers ~/Library/Containers 2>/dev/null | sort -rh | head -25"]),
+    ("applications", ["sh", "-c", "du -sh /Applications/* 2>/dev/null | sort -rh | head -30"]),
+]
+
+
 def _keeper(c):
     """The disk keeper (src/keeper.py) once a day, started while you're away from the Mac (no input for [keeper]
     idle_min minutes) and no music playing; it stops itself the moment you're back and carries on next time."""
@@ -1484,6 +1522,14 @@ def _keeper(c):
                         sz = maint.du(t)
                         moved = maint.move_to_trash(t, log)  # (the Trash: undoable until it's emptied)
                         out.append(f"{'to the Trash' if moved else 'left'} {sz / 1e9:.1f} GB  {t}")
+                elif l == "diag":  # read-only health check of the whole Mac (a fixed list: nothing is changed)
+                    for title, argv in DIAG:
+                        try:
+                            r = subprocess.run(argv, capture_output=True, text=True, timeout=300)
+                            txt = (r.stdout + r.stderr).strip()
+                        except (OSError, subprocess.TimeoutExpired) as e:
+                            txt = f"(failed: {e})"
+                        out.append(f"===== {title}\n{txt[:20000]}")
                 elif l == "fix iosdev":
                     out.append(f"fix iosdev: {maint.fix('iosdev', log)}")
                 else:

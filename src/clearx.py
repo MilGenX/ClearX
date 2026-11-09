@@ -1543,6 +1543,10 @@ def _keeper(c):
                     r = subprocess.run(["sh", "-c", "brew untap --force homebrew/core 2>&1; brew update 2>&1 | tail -3; brew doctor 2>&1 | grep -E '^Warning' "],
                                        capture_output=True, timeout=900, env=env)
                     out.append((r.stdout + r.stderr).decode("utf-8", "replace"))
+                elif l == "health":  # the health watch now (src/health.py), its leftover-caffeinate fix included
+                    r = subprocess.run([sys.executable, os.path.realpath(__file__), "maintain", "health", "--fix"],
+                                       capture_output=True, timeout=900)
+                    out.append((r.stdout + r.stderr).decode("utf-8", "replace"))
                 elif l == "fix iosdev":
                     out.append(f"fix iosdev: {maint.fix('iosdev', log)}")
                 else:

@@ -1534,6 +1534,9 @@ def _keeper(c):
                         except (OSError, subprocess.TimeoutExpired) as e:
                             txt = f"(failed: {e})"
                         out.append(f"===== {title}\n{txt[:20000]}")
+                elif l == "usb":  # what's plugged in by USB (read-only)
+                    r = subprocess.run(["system_profiler", "SPUSBDataType", "SPUSBHostDataType"], capture_output=True, timeout=120)
+                    out.append((r.stdout + r.stderr).decode("utf-8", "replace")[:20000])
                 elif l == "who caffeinate":  # what holds the Mac awake: each caffeinate and its parent chain
                     r = subprocess.run(["sh", "-c", "for p in $(pgrep -x caffeinate); do ps -o pid,ppid,etime,command -p $p; pp=$(ps -o ppid= -p $p); for i in 1 2 3; do [ -n \"$pp\" ] && [ \"$pp\" -gt 1 ] && ps -o pid,ppid,etime,command -p $pp | tail -1 && pp=$(ps -o ppid= -p $pp); done; done"],
                                        capture_output=True, timeout=60)

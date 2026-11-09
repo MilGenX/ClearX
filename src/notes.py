@@ -10,7 +10,7 @@ Nothing is ever deleted: notes and folders are only made and moved. Each step's 
 import json, os, subprocess
 
 EXPORT = r"""
-const N = Application('Notes'); const folders = [], notes = [], seen = {};
+const N = Application('com.apple.Notes'); const folders = [], notes = [], seen = {};
 function walk(f, parent, acct) {
   const id = f.id(); if (seen[id]) return; seen[id] = 1;
   let shared = false; try { shared = f.shared(); } catch (e) {}
@@ -34,7 +34,7 @@ JSON.stringify({folders: folders, notes: notes});
 
 APPLY = r"""
 function run(argv) {
-  const N = Application('Notes'); const plan = JSON.parse(argv[0]); const out = []; const made = {};
+  const N = Application('com.apple.Notes'); const plan = JSON.parse(argv[0]); const out = []; const made = {};
   const acct = N.defaultAccount();
   function folder(ref) {
     if (!ref) return null; if (made[ref]) return made[ref];
@@ -104,7 +104,7 @@ def apply(state_dir):
     with open(p) as f:
         plan = f.read()
     json.loads(plan)  # (refuses a broken plan before anything moves)
-    if not os.environ.get("TERM_PROGRAM") and _osa("Application('Notes').name()")[0] != 0:
+    if not os.environ.get("TERM_PROGRAM") and _osa("Application('com.apple.Notes').name()")[0] != 0:
         return via_terminal("apply", state_dir)
     code, out, err = _osa(APPLY, plan)
     os.rename(p, p + ".done")
@@ -115,7 +115,7 @@ def test(state_dir):
     if not os.environ.get("TERM_PROGRAM"):
         return via_terminal("test", state_dir)
     a = subprocess.run(["osascript", "-e", 'tell application "Notes" to count notes'], capture_output=True, timeout=120)
-    b = _osa("Application('Notes').notes.length")
+    b = _osa("Application('com.apple.Notes').notes.length")
     return f"applescript: {a.returncode} {a.stdout!r} {a.stderr!r}\njxa: {b}"
 
 

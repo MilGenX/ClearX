@@ -39,6 +39,8 @@ function run(argv) {
   function folder(ref) {
     if (!ref) return null; if (made[ref]) return made[ref];
     try { const f = N.folders.byId(ref); f.name(); return f; } catch (e) {}
+    const seek = fs => { for (const f of fs) { if (f.id() === ref) return f; const g = seek(f.folders()); if (g) return g; } return null; };
+    if (String(ref).startsWith('x-coredata')) { const g = seek(acct.folders()); if (g) return g; }
     const hit = acct.folders.whose({name: ref})(); return hit.length ? hit[0] : null;
   }
   plan.forEach(s => {
@@ -54,7 +56,7 @@ function run(argv) {
         N.move(N.notes.byId(s.id), {to: to}); out.push('ok move ' + s.id);
       } else if (s.op === 'movefolder') {
         const to = folder(s.to); if (!to) throw new Error('no folder ' + s.to);
-        N.move(N.folders.byId(s.id), {to: to}); out.push('ok movefolder ' + s.id);
+        const src = folder(s.id); if (!src) throw new Error('no folder ' + s.id); N.move(src, {to: to}); out.push('ok movefolder ' + s.id);
       } else if (s.op === 'rename') {
         folder(s.id).name = s.name; out.push('ok rename ' + s.name);
       }

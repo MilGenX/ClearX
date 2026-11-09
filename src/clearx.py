@@ -1525,8 +1525,8 @@ def _keeper(c):
                 elif l == "diag":  # read-only health check of the whole Mac (a fixed list: nothing is changed)
                     for title, argv in DIAG:
                         try:
-                            r = subprocess.run(argv, capture_output=True, text=True, timeout=300)
-                            txt = (r.stdout + r.stderr).strip()
+                            r = subprocess.run(argv, capture_output=True, timeout=300)
+                            txt = (r.stdout + r.stderr).decode("utf-8", "replace").strip()
                         except (OSError, subprocess.TimeoutExpired) as e:
                             txt = f"(failed: {e})"
                         out.append(f"===== {title}\n{txt[:20000]}")

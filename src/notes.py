@@ -70,8 +70,23 @@ def _osa(script, *args, timeout=3600):
     return r.returncode, r.stdout.decode("utf-8", "replace"), r.stderr.decode("utf-8", "replace")
 
 
+def via_terminal(what, state_dir):
+    """ClearX's tick runs outside the desktop session, where Notes answers -600 ("isn't running"): the same step is
+    run in Terminal instead (it asks once to control Notes), and its result lands in state/notes-<what>.out."""
+    sh = os.path.join(state_dir, f"notes-{what}.command")
+    with open(sh, "w") as f:
+        f.write(f"#!/bin/sh\ncd {json.dumps(os.path.dirname(os.path.realpath(__file__)))}\n"
+                f"/usr/bin/python3 notes.py {what} {json.dumps(state_dir)} > {json.dumps(os.path.join(state_dir, f'notes-{what}.out'))} 2>&1\n"
+                f"rm -f {json.dumps(sh)}\nexit 0\n")
+    os.chmod(sh, 0o700)
+    subprocess.run(["open", "-a", "Terminal", sh], timeout=60)
+    return f"notes {what}: started in Terminal (result in notes-{what}.out)"
+
+
 def export(state_dir):
     code, out, err = _osa(EXPORT)
+    if code != 0 and "-600" in err and not os.environ.get("TERM_PROGRAM"):
+        return via_terminal("export", state_dir)
     if code != 0:
         return f"notes export failed: {err.strip()[:500]}"
     p = os.path.join(state_dir, "notes.json")
@@ -89,6 +104,8 @@ def apply(state_dir):
     with open(p) as f:
         plan = f.read()
     json.loads(plan)  # (refuses a broken plan before anything moves)
+    if not os.environ.get("TERM_PROGRAM") and _osa("Application('Notes').name()")[0] != 0:
+        return via_terminal("apply", state_dir)
     code, out, err = _osa(APPLY, plan)
     os.rename(p, p + ".done")
     return f"notes apply (exit {code}):\n{out}{err[:2000]}"
@@ -101,3 +118,8 @@ def forget(state_dir):
         except OSError:
             pass
     return "notes forget: export removed"
+
+
+if __name__ == "__main__":
+    import sys
+    print(globals()[sys.argv[1]](sys.argv[2]))

@@ -1547,6 +1547,17 @@ def _keeper(c):
                     r = subprocess.run([sys.executable, os.path.realpath(__file__), "maintain", "health", "--fix"],
                                        capture_output=True, timeout=900)
                     out.append((r.stdout + r.stderr).decode("utf-8", "replace"))
+                elif cmd == "pull" and os.path.realpath(os.path.expanduser(arg)).startswith(os.path.expanduser("~/Developer/")):
+                    # a checkout brought up to date with the Mac's own GitHub sign-in (fast-forward only: a checkout with
+                    # changes or its own commits is left as it is)
+                    repo = os.path.realpath(os.path.expanduser(arg))
+                    dirty = subprocess.run(["git", "-C", repo, "status", "--porcelain", "--untracked-files=no"], capture_output=True, timeout=120).stdout.strip()
+                    if dirty:
+                        out.append(f"left {repo}: it has changes")
+                    else:
+                        r = subprocess.run(["git", "-C", repo, "pull", "--ff-only", "-q"], capture_output=True, timeout=600)
+                        h = subprocess.run(["git", "-C", repo, "log", "-1", "--format=%h %cr: %s"], capture_output=True, timeout=30)
+                        out.append(f"pull {repo}: {'ok' if r.returncode == 0 else 'failed'} {(r.stdout + r.stderr).decode('utf-8', 'replace').strip()[:300]} | now {h.stdout.decode('utf-8', 'replace').strip()[:120]}")
                 elif l == "fix iosdev":
                     out.append(f"fix iosdev: {maint.fix('iosdev', log)}")
                 else:
